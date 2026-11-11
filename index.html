@@ -41,6 +41,8 @@
       <div class="printbar" role="group" aria-label="Drucker">
         <span id="connStatus" class="status-pill" role="status">Nicht verbunden</span>
         <button data-cmd="connect" id="connectBtn" data-icon="usb">Verbinden</button>
+        <button data-cmd="calibrate" data-icon="ruler" title="Drucker kalibrieren: Testmuster drucken, nachmessen, Werte speichern">Kalibrieren</button>
+        <button data-cmd="diagnostics" data-icon="stethoscope" class="icon-only" title="Druckerprofil / Diagnose" aria-label="Druckerprofil / Diagnose"></button>
         <label class="copies" title="Anzahl Kopien">
           <span>Kopien</span>
           <input id="copies" type="number" min="1" max="99" value="1" inputmode="numeric" />

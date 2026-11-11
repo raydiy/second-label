@@ -5,10 +5,12 @@ import { LabelEditor } from './editor/editor';
 import { preloadBundledFonts } from './editor/fonts';
 import { designSize, isContinuous, mmToDots, printableMm } from './editor/geometry';
 import { renderRaster, renderThumbnail } from './editor/render';
-import type { Media, PrintTarget, PrinterDriver } from './printer/types';
+import type { Media, PrintTarget } from './printer/types';
 import { getLayout, importLayouts, listLayouts, newId, putLayout, requestPersistentStorage } from './storage/db';
 import { LAYOUT_FORMAT, LAYOUT_VERSION, downloadLayout, downloadLibrary, readImportFile, type LayoutFile } from './storage/layout-file';
 import { askBarcode, pickIcon } from './ui/dialogs';
+import { openCalibrationWizard, type CalibrationDriver } from './ui/calibration';
+import { openDiagnostics } from './ui/diagnostics';
 import { $, decorateIcons, h, num, toast } from './ui/dom';
 import { renderLibrary, type LibraryActions } from './ui/library';
 import { renderProperties } from './ui/properties';
@@ -16,7 +18,7 @@ import { APP_BUILD_DATE, APP_COMMIT, APP_VERSION } from './build-info';
 
 // ---------- state ----------
 
-const driver: PrinterDriver & { simulated?: boolean } = new Driver();
+const driver: CalibrationDriver = new Driver();
 const mediaById = (id: string) => MEDIA.find((m) => m.id === id);
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
@@ -326,7 +328,7 @@ function showBrowserNotices() {
   if (!('usb' in navigator)) {
     notes.push('Dieser Browser unterstützt kein WebUSB (z. B. Safari oder Firefox). Zum Drucken bitte Chrome, Edge, Vivaldi oder Brave verwenden. Gestalten, Speichern und die Vorschau funktionieren trotzdem.');
   }
-  if (driver.simulated) notes.push('Simulationsmodus: Es ist noch kein echter Druckertreiber eingebunden, „Drucken“ zeigt das Druckbild an.');
+  if (driver.simulated) notes.push('Simulationsmodus (?mock): Es wird kein echter Drucker angesprochen, „Drucken“ zeigt das Druckbild an.');
   els.notices.replaceChildren(...notes.map((n) => h('div', { class: 'notice', role: 'note' }, n)));
 }
 
@@ -457,6 +459,14 @@ const commands: Record<string, () => unknown> = {
   disconnect,
   preview,
   print,
+  calibrate: () => openCalibrationWizard({
+    driver,
+    media: MEDIA,
+    currentMedia: editor.media,
+    connect: async () => { await connect(); return driver.isConnected(); },
+    errorText: usbErrorText,
+  }),
+  diagnostics: () => openDiagnostics({ driver, media: editor.media, errorText: usbErrorText }),
 };
 
 document.addEventListener('click', (e) => {

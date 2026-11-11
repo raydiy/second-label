@@ -65,3 +65,22 @@ export interface PrinterDriver {
   getStatus(target: PrintTarget): Promise<PrinterStatus>;
   print(raster: DesignRaster, options?: PrintOptions): Promise<void>;
 }
+
+/**
+ * Per-device print calibration. Defaults, validation and storage live in calibration.ts,
+ * the solver that derives new values from ruler measurements in calibrate.ts.
+ */
+export interface Calibration {
+  label: {
+    /** Head dot that portrait column 0 of the design lands on (negative = label edge below dot 0). */
+    headOffsetDots: number;
+    /** Design column (in dots) that raster row 0 prints. */
+    feedStartDots: number;
+    /** Design columns advanced per raster row (> 1 when the printer feeds long). */
+    feedScale: number;
+  };
+  tape: {
+    /** Centring correction per tape width in mm, in dots, positive = towards higher dot numbers. */
+    centerCorrectionDots: Record<number, number>;
+  };
+}

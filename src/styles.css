@@ -185,3 +185,70 @@ dialog h2 { font-size: 15px; text-transform: none; letter-spacing: 0; color: var
 input[type='search'] {
   width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel);
 }
+
+/* Calibration wizard */
+.calib-dialog { width: 620px; }
+.calib-steps { display: flex; gap: 4px; list-style: none; margin: 0 0 12px; padding: 0; flex-wrap: wrap; }
+.calib-steps li {
+  flex: 1; min-width: 110px; padding: 4px 8px; border-radius: var(--radius); font-size: 11.5px;
+  color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); white-space: nowrap;
+}
+.calib-steps li.done { color: var(--text); }
+.calib-steps li.current { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.calib-body { display: flex; flex-direction: column; gap: 8px; min-height: 240px; line-height: 1.45; }
+.calib-body p { margin: 0; }
+.calib-device { padding: 6px 9px; border-radius: var(--radius); background: var(--panel-2); border: 1px solid var(--border); font-size: 12px; }
+.calib-device.warn { background: var(--warn-bg); color: var(--warn-text); border-color: transparent; }
+.calib-pattern-wrap { background: var(--stage); padding: 10px; border-radius: var(--radius); text-align: center; }
+.calib-pattern { max-width: 100%; max-height: 200px; image-rendering: pixelated; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.calib-diagram { background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; }
+.calib-diagram .paper { fill: #fff; stroke: var(--muted); stroke-width: 1; }
+.calib-diagram .frame { fill: none; stroke: #000; stroke-width: 2; }
+.calib-diagram .ink { fill: #000; }
+.calib-diagram .num { font-size: 9px; text-anchor: middle; fill: #000; font-family: inherit; }
+.calib-diagram .dim { stroke: var(--accent); stroke-width: 1.6; }
+.calib-diagram .dimhead { fill: var(--accent); }
+.calib-diagram .ext { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 2; }
+.calib-diagram .letter { font-size: 13px; font-weight: 700; text-anchor: middle; fill: var(--accent); font-family: inherit; }
+.calib-diagram .cap { font-size: 9px; text-anchor: middle; fill: var(--muted); font-family: inherit; }
+.calib-rules { margin: 0; padding-left: 18px; color: var(--muted); }
+.calib-field {
+  display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 8px;
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel);
+}
+.calib-letter {
+  display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-text); font-weight: 700;
+}
+.calib-label small { display: block; font-size: 11px; }
+.calib-label select { width: auto; margin: 0 4px; padding: 2px 4px; }
+.calib-input { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+.calib-input input { width: 76px; text-align: right; font-variant-numeric: tabular-nums; }
+.calib-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.calib-table th, .calib-table td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+.calib-table th { font-size: 11px; color: var(--muted); font-weight: 600; }
+.calib-table tr.same td { color: var(--muted); }
+.calib-errors { padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--danger); color: var(--danger); }
+.calib-errors p + p { margin-top: 4px; }
+.ok-text { color: var(--ok); }
+.calib-dialog .dialog-actions { align-items: center; }
+.calib-left { margin-right: auto; display: flex; gap: 6px; }
+
+/* Diagnostics */
+.diag-dialog { width: 720px; }
+.diag-content { max-height: 46vh; overflow: auto; margin-top: 8px; }
+.diag-table { width: 100%; border-collapse: collapse; }
+.diag-table th, .diag-table td { text-align: left; vertical-align: top; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+.diag-table th { width: 160px; color: var(--muted); font-weight: 600; font-size: 12px; }
+.diag-table td { word-break: break-word; }
+.diag-table code, .diag-list code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; }
+.diag-list { margin: 0; padding-left: 16px; }
+.diag-note { margin-top: 10px; }
+.diag-details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.diag-json {
+  max-height: 220px; overflow: auto; padding: 8px; background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius); font-size: 11px; line-height: 1.4;
+}
+.diag-notice { margin: 8px 0 0; padding: 7px 10px; border-radius: var(--radius); background: var(--warn-bg); color: var(--warn-text); }
+.diag-dialog .dialog-actions { flex-wrap: wrap; }
+.diag-dialog .diag-refresh { margin-right: auto; }

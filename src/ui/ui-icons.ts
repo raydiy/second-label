@@ -41,6 +41,10 @@ import i_folder_open from 'lucide-static/icons/folder-open.svg?raw';
 import i_pencil from 'lucide-static/icons/pencil.svg?raw';
 import i_plug from 'lucide-static/icons/plug.svg?raw';
 import i_unplug from 'lucide-static/icons/unplug.svg?raw';
+import i_ruler from 'lucide-static/icons/ruler.svg?raw';
+import i_stethoscope from 'lucide-static/icons/stethoscope.svg?raw';
+import i_external_link from 'lucide-static/icons/external-link.svg?raw';
+import i_rotate_ccw from 'lucide-static/icons/rotate-ccw.svg?raw';
 
 const ICONS: Record<string, string> = {
   'type': i_type,
@@ -85,6 +89,10 @@ const ICONS: Record<string, string> = {
   'pencil': i_pencil,
   'plug': i_plug,
   'unplug': i_unplug,
+  'ruler': i_ruler,
+  'stethoscope': i_stethoscope,
+  'external-link': i_external_link,
+  'rotate-ccw': i_rotate_ccw,
 };
 
 /** Returns inline SVG markup for a UI icon (decorative, aria-hidden). */

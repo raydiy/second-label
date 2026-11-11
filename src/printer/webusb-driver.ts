@@ -8,9 +8,11 @@
 // The USB types below are structural subsets of the WebUSB API so this file compiles without
 // @types/w3c-web-usb and can be exercised in tests with a fake device.
 
-import type { DesignRaster, PrintOptions, PrintTarget, PrinterDriver, PrinterStatus } from './types';
+import type { Calibration, DesignRaster, PrintOptions, PrintTarget, PrinterDriver, PrinterStatus } from './types';
 import { buildLabelJob, buildTapeJob, cmdStatus, decodeLabelStatus, decodeTapeStatus } from './commands';
 import { mmToDots, rasterize, type DitherMode } from './raster';
+import { DEFAULT_CALIBRATION, deviceKey, loadCalibration } from './calibration';
+import { stripSerialFields, type DeviceIdEntry, type StatusSnapshot, type UsbDeviceSummary } from './diagnostics';
 
 export const DYMO_VENDOR_ID = 0x0922;
 export const DUO_PRODUCT_ID = 0x001d;
@@ -27,7 +29,14 @@ export interface UsbEndpointLike {
 export interface UsbInterfaceLike {
   interfaceNumber: number;
   claimed?: boolean;
-  alternate: { endpoints: UsbEndpointLike[] };
+  alternate: {
+    endpoints: UsbEndpointLike[];
+    alternateSetting?: number;
+    interfaceClass?: number;
+    interfaceSubclass?: number;
+    interfaceProtocol?: number;
+    interfaceName?: string | null;
+  };
 }
 export interface UsbTransferInLike {
   status?: 'ok' | 'stall' | 'babble';
@@ -41,6 +50,15 @@ export interface UsbDeviceLike {
   vendorId: number;
   productId: number;
   productName?: string;
+  manufacturerName?: string;
+  usbVersionMajor?: number;
+  usbVersionMinor?: number;
+  deviceClass?: number;
+  deviceSubclass?: number;
+  deviceProtocol?: number;
+  deviceVersionMajor?: number;
+  deviceVersionMinor?: number;
+  deviceVersionSubminor?: number;
   opened: boolean;
   configuration: { configurationValue: number; interfaces: UsbInterfaceLike[] } | null;
   open(): Promise<void>;
@@ -71,6 +89,11 @@ export interface WebUsbDriverOptions {
   dither?: DitherMode;
   /** Status reply timeout in ms. Default 2000. */
   statusTimeoutMs?: number;
+  /**
+   * Stored calibration for a device key ("0922:001d"), consulted on every print.
+   * Defaults to localStorage (calibration.ts); return null to use DEFAULT_CALIBRATION.
+   */
+  calibrationFor?: (deviceKey: string) => Calibration | null;
 }
 
 interface EngineIo {
@@ -85,6 +108,7 @@ export class WebUsbPrinterDriver implements PrinterDriver {
   private claimed = new Set<number>();
   private queue: Promise<unknown> = Promise.resolve();
   private readonly opts: Required<Omit<WebUsbDriverOptions, 'usb'>> & { usb?: UsbLike };
+  private statusLog: Partial<Record<PrintTarget, StatusSnapshot>> = {};
 
   constructor(opts: WebUsbDriverOptions = {}) {
     this.opts = {
@@ -93,6 +117,7 @@ export class WebUsbPrinterDriver implements PrinterDriver {
       tapeType: opts.tapeType ?? 0,
       dither: opts.dither ?? 'threshold',
       statusTimeoutMs: opts.statusTimeoutMs ?? 2000,
+      calibrationFor: opts.calibrationFor ?? ((key) => loadCalibration(key)?.calibration ?? null),
     };
   }
 
@@ -155,20 +180,100 @@ export class WebUsbPrinterDriver implements PrinterDriver {
     if (!device.controlTransferIn) return null;
     return this.serialize(async () => {
       const io = await this.engine(target);
-      const r = await device.controlTransferIn!(
-        { requestType: 'class', recipient: 'interface', request: 0, value: 0, index: io.iface << 8 },
-        1023,
-      );
-      if (r.status !== 'ok' || !r.data) return null;
-      const u8 = new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength);
-      const len = Math.min((u8[0] << 8) | u8[1], u8.length);
-      return new TextDecoder().decode(u8.subarray(2, len));
+      return this.readDeviceIdRaw(io.iface);
     });
+  }
+
+  // --- calibration and diagnostics ---------------------------------------------------------
+
+  /** Calibration storage key of the connected model ("0922:001d"), null when not connected. */
+  deviceKey(): string | null {
+    return this.device ? deviceKey(this.device.vendorId, this.device.productId) : null;
+  }
+
+  /** Calibration used for the next print: stored for this model, else the defaults. */
+  activeCalibration(): Calibration {
+    const key = this.deviceKey();
+    return (key && this.opts.calibrationFor(key)) || DEFAULT_CALIBRATION;
+  }
+
+  /** USB descriptors of the connected device. Never includes the serial number. */
+  describeDevice(): UsbDeviceSummary | null {
+    const d = this.device;
+    if (!d) return null;
+    const ver = (a?: number, b?: number, c?: number) => (a === undefined ? undefined : [a, b ?? 0, c].filter((v) => v !== undefined).join('.'));
+    return {
+      vendorId: d.vendorId,
+      productId: d.productId,
+      productName: d.productName ?? null,
+      manufacturerName: d.manufacturerName ?? null,
+      usbVersion: ver(d.usbVersionMajor, d.usbVersionMinor) ?? null,
+      deviceVersion: ver(d.deviceVersionMajor, d.deviceVersionMinor, d.deviceVersionSubminor) ?? null,
+      deviceClass: d.deviceClass ?? null,
+      deviceSubclass: d.deviceSubclass ?? null,
+      deviceProtocol: d.deviceProtocol ?? null,
+      configurationValue: d.configuration?.configurationValue ?? null,
+      interfaces: (d.configuration?.interfaces ?? []).map((i) => ({
+        number: i.interfaceNumber,
+        alternateSetting: i.alternate.alternateSetting ?? 0,
+        interfaceClass: i.alternate.interfaceClass ?? null,
+        interfaceSubclass: i.alternate.interfaceSubclass ?? null,
+        interfaceProtocol: i.alternate.interfaceProtocol ?? null,
+        name: i.alternate.interfaceName ?? null,
+        endpoints: i.alternate.endpoints.map((e) => ({
+          number: e.endpointNumber,
+          direction: e.direction,
+          type: e.type,
+          packetSize: e.packetSize,
+        })),
+      })),
+    };
+  }
+
+  /**
+   * IEEE 1284 Device ID of every interface (USB printer class GET_DEVICE_ID), with any
+   * serial number field removed. Interfaces that cannot be read report an error instead.
+   */
+  async readDeviceIds(): Promise<DeviceIdEntry[]> {
+    const device = this.requireDevice();
+    const ifaces = device.configuration?.interfaces ?? [];
+    return this.serialize(async () => {
+      const out: DeviceIdEntry[] = [];
+      for (const i of ifaces) {
+        const n = i.interfaceNumber;
+        const cls = i.alternate.interfaceClass;
+        if (cls !== undefined && cls !== 7) {
+          out.push({ interface: n, value: null, error: `not a printer class interface (class ${cls})` });
+          continue;
+        }
+        try {
+          if (!device.controlTransferIn) throw new Error('control transfers not supported');
+          if (!this.claimed.has(n)) {
+            await device.claimInterface(n);
+            this.claimed.add(n);
+          }
+          const raw = await this.readDeviceIdRaw(n, i.alternate.alternateSetting ?? 0);
+          out.push(raw === null ? { interface: n, value: null, error: 'no answer' } : { interface: n, value: stripSerialFields(raw) });
+        } catch (e) {
+          out.push({ interface: n, value: null, error: (e as Error).message });
+        }
+      }
+      return out;
+    });
+  }
+
+  /** Last status reply per engine (raw bytes and decoded message). */
+  lastStatuses(): Partial<Record<PrintTarget, StatusSnapshot>> {
+    return { ...this.statusLog };
   }
 
   async print(raster: DesignRaster, options: PrintOptions = {}): Promise<void> {
     const target = raster.media.target;
-    const bytes = buildJob(raster, options, { tapeType: this.opts.tapeType, dither: this.opts.dither });
+    const bytes = buildJob(raster, options, {
+      tapeType: this.opts.tapeType,
+      dither: this.opts.dither,
+      calibration: this.activeCalibration(),
+    });
     await this.serialize(async () => {
       const status = await this.readStatus(target);
       if (!status.ready) throw new Error(`Printer not ready (${target}): ${status.message}`);
@@ -221,7 +326,30 @@ export class WebUsbPrinterDriver implements PrinterDriver {
     return { iface: n, outEp: out.endpointNumber, inEp: inn.endpointNumber, inPacketSize: inn.packetSize };
   }
 
+  private async readDeviceIdRaw(iface: number, alternate = 0): Promise<string | null> {
+    const device = this.requireDevice();
+    const r = await device.controlTransferIn!(
+      { requestType: 'class', recipient: 'interface', request: 0, value: 0, index: (iface << 8) | alternate },
+      1023,
+    );
+    if (r.status !== 'ok' || !r.data) return null;
+    const u8 = new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength);
+    const len = Math.min((u8[0] << 8) | u8[1], u8.length);
+    return new TextDecoder().decode(u8.subarray(2, len));
+  }
+
   private async readStatus(target: PrintTarget): Promise<PrinterStatus> {
+    const status = await this.queryStatus(target);
+    this.statusLog[target] = {
+      raw: status.raw ? Array.from(status.raw) : [],
+      ready: status.ready ?? false,
+      message: status.message ?? '',
+      at: new Date().toISOString(),
+    };
+    return status;
+  }
+
+  private async queryStatus(target: PrintTarget): Promise<PrinterStatus> {
     try {
       const io = await this.engine(target);
       const device = this.requireDevice();
@@ -240,9 +368,9 @@ export class WebUsbPrinterDriver implements PrinterDriver {
 export function buildJob(
   raster: DesignRaster,
   options: PrintOptions = {},
-  extra: { tapeType?: number; dither?: DitherMode } = {},
+  extra: { tapeType?: number; dither?: DitherMode; calibration?: Calibration } = {},
 ): Uint8Array {
-  const bitmap = rasterize(raster, { lengthMm: options.lengthMm, dither: extra.dither });
+  const bitmap = rasterize(raster, { lengthMm: options.lengthMm, dither: extra.dither, calibration: extra.calibration });
   const { media } = raster;
   if (media.target === 'label') {
     return buildLabelJob(bitmap, {

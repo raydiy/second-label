@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { WebUsbPrinterDriver, type UsbDeviceLike, type UsbLike } from '../webusb-driver';
+import { WebUsbPrinterDriver, buildJob, type UsbDeviceLike, type UsbLike } from '../webusb-driver';
 import { findMedia } from '../media';
 import { mmToDots } from '../raster';
+import { DEFAULT_CALIBRATION, cloneCalibration } from '../calibration';
+import type { Calibration } from '../types';
 
 /** Fake DUO with the descriptor layout measured on the real unit (docs/protocol.md). */
 class FakeDuo implements UsbDeviceLike {
@@ -115,5 +117,77 @@ describe('WebUsbPrinterDriver', () => {
     const media = findMedia('lw-99010')!;
     await expect(driver.print({ image: blankImage(10, 10), media })).rejects.toThrow('Out of labels');
     expect(dev.writes.length).toBe(1); // only the status request
+  });
+});
+
+describe('WebUsbPrinterDriver: calibration and diagnostics', () => {
+  const inkRun = (img: ImageData) => {
+    const y = img.height - 30;
+    for (let x = 100; x < 300; x++) {
+      const p = (y * img.width + x) * 4;
+      img.data[p] = img.data[p + 1] = img.data[p + 2] = 0;
+    }
+  };
+  const labelJob = async (calibrationFor?: (k: string) => Calibration | null) => {
+    const dev = new FakeDuo();
+    const usb: UsbLike = { requestDevice: async () => dev, getDevices: async () => [dev] };
+    const driver = new WebUsbPrinterDriver({ usb, chunkSize: 1 << 20, calibrationFor });
+    await driver.connect();
+    const media = findMedia('lw-99012')!;
+    const img = blankImage(mmToDots(89, 300), mmToDots(36, 300));
+    inkRun(img); // a black run along the bottom design row
+    await driver.print({ image: img, media });
+    return { driver, bytes: dev.writes.slice(1).flatMap((w) => Array.from(w.data)) };
+  };
+
+  test('without a stored calibration the job is byte-identical to buildJob with defaults', async () => {
+    const { driver, bytes } = await labelJob();
+    expect(driver.deviceKey()).toBe('0922:001d');
+    expect(driver.activeCalibration()).toBe(DEFAULT_CALIBRATION);
+    const media = findMedia('lw-99012')!;
+    const img = blankImage(mmToDots(89, 300), mmToDots(36, 300));
+    inkRun(img);
+    expect(bytes).toEqual(Array.from(buildJob({ image: img, media })));
+  });
+
+  test('the stored calibration of this device key is used on every print', async () => {
+    const keys: string[] = [];
+    const shifted = cloneCalibration(DEFAULT_CALIBRATION);
+    shifted.label.feedStartDots = 0;
+    const { bytes: a } = await labelJob();
+    const { bytes: b } = await labelJob((k) => { keys.push(k); return shifted; });
+    expect(keys).toEqual(['0922:001d']);
+    expect(b).not.toEqual(a);
+  });
+
+  test('describeDevice omits the serial, readDeviceIds strips SERN, last status is kept', async () => {
+    const dev = new FakeDuo() as FakeDuo & { serialNumber: string; controlTransferIn: UsbDeviceLike['controlTransferIn'] };
+    dev.serialNumber = 'SECRET123';
+    const id = 'MFG:DYMO;MDL:LabelWriter DUO Label;SERN:SECRET123;';
+    dev.controlTransferIn = async (setup) => {
+      const iface = setup.index >> 8;
+      const text = new TextEncoder().encode(iface === 0 ? id : 'MFG:DYMO;MDL:Tape;');
+      const buf = new Uint8Array(text.length + 2);
+      buf[0] = (buf.length >> 8) & 0xff;
+      buf[1] = buf.length & 0xff;
+      buf.set(text, 2);
+      return { status: 'ok', data: new DataView(buf.buffer) };
+    };
+    const usb: UsbLike = { requestDevice: async () => dev, getDevices: async () => [dev] };
+    const driver = new WebUsbPrinterDriver({ usb });
+    expect(driver.describeDevice()).toBeNull();
+    await driver.connect();
+    const d = driver.describeDevice()!;
+    expect(JSON.stringify(d)).not.toContain('SECRET');
+    expect(d.interfaces.map((i) => i.endpoints.length)).toEqual([2, 2]);
+    const ids = await driver.readDeviceIds();
+    expect(ids).toEqual([
+      { interface: 0, value: 'MFG:DYMO;MDL:LabelWriter DUO Label;' },
+      { interface: 1, value: 'MFG:DYMO;MDL:Tape;' },
+    ]);
+    expect(await driver.getDeviceId('label')).toBe(id); // raw accessor unchanged
+    await driver.getStatus('tape');
+    expect(driver.lastStatuses().tape).toMatchObject({ raw: [0xc0], ready: true, message: 'Ready' });
+    expect(driver.lastStatuses().label).toBeUndefined();
   });
 });

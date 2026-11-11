@@ -17,7 +17,7 @@
 //   tape:  the tape is centred on the 128-dot head (the vendor CUPS driver also centres the
 //          raster line), plus an optional per-width correction.
 
-import type { DesignRaster, Media, MonoBitmap } from './types';
+import type { Calibration, DesignRaster, Media, MonoBitmap } from './types';
 import { LABEL_DPI, LABEL_HEAD_DOTS, TAPE_DPI, TAPE_HEAD_DOTS } from './commands';
 
 export type DitherMode = 'threshold' | 'floyd-steinberg';
@@ -32,6 +32,8 @@ export interface RasterizeOptions {
    * Die-cut labels always use media.lengthMm.
    */
   lengthMm?: number;
+  /** Per-device calibration. Defaults to DEFAULT_CALIBRATION (René's DUO, PID 0x001D). */
+  calibration?: Calibration;
 }
 
 /**
@@ -43,7 +45,9 @@ export interface RasterizeOptions {
 export const TAPE_CENTER_CORRECTION_DOTS: Record<number, number> = { 6: 0, 9: 0, 12: 0, 19: 0, 24: 0 };
 
 /**
- * Label engine calibration, measured on the DUO (PID 0x001D) with 99012 labels, 3 identical
+ * Default label engine calibration (DEFAULT_CALIBRATION below). Per-device values measured with
+ * the in-app wizard are stored by calibration.ts and passed in via RasterizeOptions.calibration.
+ * Measured on the DUO (PID 0x001D) with 99012 labels, 3 identical
  * prints in two jobs (so not a first-label / reverse-feed effect):
  *   - across the head the label edge sits about 1.5 mm below head dot 0 (content printed 1.5 mm
  *     too far towards the design top with offset 0),
@@ -58,19 +62,37 @@ export const LABEL_FEED_START_DOTS = 62.4;
 export const LABEL_FEED_SCALE = 1.0095;
 
 /**
+ * The constants above as a Calibration. Used whenever no per-device calibration is stored;
+ * printing with it is byte-identical to the hardcoded behaviour before calibration existed.
+ */
+export const DEFAULT_CALIBRATION: Calibration = Object.freeze({
+  label: Object.freeze({
+    headOffsetDots: LABEL_HEAD_OFFSET_DOTS,
+    feedStartDots: LABEL_FEED_START_DOTS,
+    feedScale: LABEL_FEED_SCALE,
+  }),
+  tape: Object.freeze({ centerCorrectionDots: Object.freeze({ ...TAPE_CENTER_CORRECTION_DOTS }) }),
+}) as Calibration;
+
+/**
  * Design columns [from, to) that raster row r covers. Every column is covered by exactly one
  * row (no thin vertical line can be dropped); a row ORs the columns it covers.
  */
-export function labelSourceSpan(r: number): [number, number] {
-  const from = Math.floor(LABEL_FEED_START_DOTS + r * LABEL_FEED_SCALE);
-  const to = Math.floor(LABEL_FEED_START_DOTS + (r + 1) * LABEL_FEED_SCALE);
+export function labelSourceSpan(r: number, cal: Calibration['label'] = DEFAULT_CALIBRATION.label): [number, number] {
+  const from = Math.floor(cal.feedStartDots + r * cal.feedScale);
+  const to = Math.floor(cal.feedStartDots + (r + 1) * cal.feedScale);
   return [from, Math.max(from + 1, to)];
 }
 
+/** Tape centring correction for a tape width (0 when the width has no entry). */
+export function tapeCorrectionDots(cal: Calibration, widthMm: number): number {
+  return cal.tape.centerCorrectionDots[widthMm] ?? 0;
+}
+
 /** Head dot that portrait column 0 of the design lands on. */
-export function headOffsetDots(media: Media, designHeightDots: number): number {
-  if (media.target === 'label') return LABEL_HEAD_OFFSET_DOTS;
-  return Math.round(TAPE_HEAD_DOTS / 2 - designHeightDots / 2) + (TAPE_CENTER_CORRECTION_DOTS[media.widthMm] ?? 0);
+export function headOffsetDots(media: Media, designHeightDots: number, cal: Calibration = DEFAULT_CALIBRATION): number {
+  if (media.target === 'label') return cal.label.headOffsetDots;
+  return Math.round(TAPE_HEAD_DOTS / 2 - designHeightDots / 2) + tapeCorrectionDots(cal, media.widthMm);
 }
 
 export function headDots(media: Media): number {
@@ -147,7 +169,8 @@ export function rasterize(raster: DesignRaster, opts: RasterizeOptions = {}): Mo
   const data = new Uint8Array(bytesPerRow * height);
   const mono = toMonoDesign(image, opts.dither ?? 'threshold', opts.threshold ?? 128);
   const H = image.height;
-  const offset = headOffsetDots(media, H);
+  const cal = opts.calibration ?? DEFAULT_CALIBRATION;
+  const offset = headOffsetDots(media, H, cal);
   const isLabel = media.target === 'label';
   const W = image.width;
   for (let y = 0; y < H; y++) {
@@ -159,7 +182,7 @@ export function rasterize(raster: DesignRaster, opts: RasterizeOptions = {}): Mo
     for (let r = 0; r < height; r++) {
       let from = r;
       let to = r + 1;
-      if (isLabel) [from, to] = labelSourceSpan(r);
+      if (isLabel) [from, to] = labelSourceSpan(r, cal.label);
       if (from >= W) break;
       for (let x = from; x < Math.min(to, W); x++) {
         if (mono[src + x]) {
