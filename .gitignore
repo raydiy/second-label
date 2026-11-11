@@ -5,3 +5,4 @@ dist/
 spike/node_modules/
 spike/*.bin
 docs-editor-screenshot.png
+CLAUDE.md
