@@ -12,6 +12,7 @@ import { askBarcode, pickIcon } from './ui/dialogs';
 import { $, decorateIcons, h, num, toast } from './ui/dom';
 import { renderLibrary, type LibraryActions } from './ui/library';
 import { renderProperties } from './ui/properties';
+import { APP_BUILD_DATE, APP_COMMIT, APP_VERSION } from './build-info';
 
 // ---------- state ----------
 
@@ -55,6 +56,12 @@ await preloadBundledFonts();
 
 const initialMedia = mediaById(store.get('dymo.mediaId') ?? '') ?? MEDIA[0];
 const editor = new LabelEditor(els.canvas, initialMedia);
+
+const versionEl = document.querySelector<HTMLElement>('#appVersion');
+if (versionEl) {
+  versionEl.textContent = `v${APP_VERSION}`;
+  versionEl.title = `Version ${APP_VERSION} · Commit ${APP_COMMIT} · Build ${APP_BUILD_DATE}`;
+}
 
 // Clicking the dark stage around the label leaves text editing and clears the selection.
 document.querySelector('.stage')?.addEventListener('pointerdown', (e) => {

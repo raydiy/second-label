@@ -33,6 +33,10 @@ Other models are not supported yet. Contributions with test results for further 
 - **Windows:** not tested. The Windows printer driver usually claims the device, which blocks WebUSB. Replacing the driver with WinUSB (for example with [Zadig](https://zadig.akeo.ie/)) should make it accessible, at the cost of the regular Windows print queue.
 - **Linux:** not tested. The `usblp` kernel module claims printer-class devices. A udev rule or blacklisting `usblp` for this device should make it accessible.
 
+## Versioning
+
+The version lives in `package.json` and is shown next to the logo, together with the commit it was built from. Changes are listed in [CHANGELOG.md](CHANGELOG.md). Releases are tagged `vX.Y.Z`.
+
 ## Development
 
 Requires [Bun](https://bun.sh).
