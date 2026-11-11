@@ -4,7 +4,7 @@ A free, browser-based label designer that prints directly to older thermal label
 
 Working printers should not end up in the bin just because their official software is no longer maintained. Second Label talks to the printer straight from the browser via [WebUSB](https://developer.mozilla.org/en-US/docs/Web/API/WebUSB_API), so a printer that still works can keep working.
 
-**Open the app:** https://reneaye.github.io/second-label/
+**Open the app:** https://raydiy.github.io/second-label/
 
 ## Features
 
