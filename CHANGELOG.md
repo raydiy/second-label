@@ -2,7 +2,7 @@
 
 All notable changes to Second Label. Versions follow [Semantic Versioning](https://semver.org): new features raise the middle number, fixes the last one.
 
-## Unreleased
+## 0.3.0 (2026-11-11)
 
 - Calibration wizard ("Kalibrieren"): prints a test pattern with numbered 10 mm ticks, asks for a few ruler measurements, shows old and new values and saves them per printer model (USB vendor and product id, never the serial number). Every print uses the stored values; "Auf Standard zurücksetzen" restores the defaults. Labels: feed start, feed scale and position across the head. Tape: centring per tape width
 - Printer profile / diagnostics ("Druckerprofil / Diagnose"): collects USB descriptors, IEEE 1284 device ids (serial removed), last status bytes, active calibration, medium, app version and browser, with a free-text note. Download as JSON or open a prefilled GitHub issue ("Auf GitHub melden"); new issue template `printer-report.md`
