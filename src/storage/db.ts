@@ -42,4 +42,30 @@ export async function listLayouts(): Promise<StoredLayout[]> {
 
 export const getLayout = (id: string) => tx<StoredLayout | undefined>('readonly', (s) => s.get(id));
 export const putLayout = (l: StoredLayout) => tx('readwrite', (s) => s.put(l)).then(() => undefined);
+/**
+ * Ask the browser to keep this site's storage (no eviction under storage pressure).
+ * Chromium decides silently, without a prompt. Returns whether storage is persistent.
+ */
+export async function requestPersistentStorage(): Promise<boolean> {
+  try {
+    if (!navigator.storage?.persist) return false;
+    if (await navigator.storage.persisted()) return true;
+    return await navigator.storage.persist();
+  } catch {
+    return false;
+  }
+}
+
+/** Merge a backup into the library: new ids are added, existing ones only if the backup is newer. */
+export async function importLayouts(layouts: StoredLayout[]): Promise<{ added: number; updated: number; skipped: number }> {
+  let added = 0, updated = 0, skipped = 0;
+  for (const l of layouts) {
+    const cur = await getLayout(l.id);
+    if (!cur) { await putLayout(l); added++; }
+    else if (l.updatedAt > cur.updatedAt) { await putLayout(l); updated++; }
+    else skipped++;
+  }
+  return { added, updated, skipped };
+}
+
 export const deleteLayout = (id: string) => tx('readwrite', (s) => s.delete(id)).then(() => undefined);

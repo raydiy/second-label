@@ -104,6 +104,9 @@ textarea { resize: vertical; min-height: 54px; }
 .segmented input:checked + span { background: var(--accent); color: var(--accent-text); }
 .segmented input:focus-visible + span { box-shadow: inset var(--focus); }
 
+.library-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.library-head h2 { margin: 0; }
+.library-head button { padding: 2px 8px; font-size: 11.5px; }
 .library-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .library-list li {
   border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; background: var(--panel-2);

@@ -70,11 +70,61 @@ export function downloadLayout(l: LayoutFile) {
 }
 
 export async function readLayoutFile(file: File): Promise<LayoutFile> {
+  const r = await readImportFile(file);
+  if (r.kind !== 'layout') throw new Error('Die Datei ist eine Bibliotheks-Sicherung, kein einzelnes Layout.');
+  return r.layout;
+}
+
+// ---------- whole-library backup ----------
+
+export const LIBRARY_FORMAT = 'second-label-library';
+
+export interface LibraryFile {
+  format: typeof LIBRARY_FORMAT;
+  version: typeof LAYOUT_VERSION;
+  exportedAt: string;
+  layouts: StoredLayout[];
+}
+
+export type ImportResult = { kind: 'layout'; layout: LayoutFile } | { kind: 'library'; layouts: StoredLayout[] };
+
+/** Reads either a single layout file or a whole-library backup. */
+export async function readImportFile(file: File): Promise<ImportResult> {
   let data: unknown;
   try {
     data = JSON.parse(await file.text());
   } catch {
     throw new Error('Die Datei ist kein gültiges JSON.');
   }
-  return parseLayout(data);
+  const o = data as Record<string, any> | null;
+  if (o && o.format === LIBRARY_FORMAT) {
+    if (typeof o.version !== 'number' || o.version > LAYOUT_VERSION) {
+      throw new Error('Die Sicherung stammt aus einer neueren Programmversion. Bitte die Anwendung aktualisieren.');
+    }
+    if (!Array.isArray(o.layouts)) throw new Error('Die Sicherung enthält keine Layouts.');
+    const layouts = o.layouts.map((raw: Record<string, any>) => ({
+      ...parseLayout({ ...raw, format: LAYOUT_FORMAT, version: raw.version ?? o.version }),
+      id: typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID(),
+      thumbnail: typeof raw.thumbnail === 'string' ? raw.thumbnail : undefined,
+    }));
+    return { kind: 'library', layouts };
+  }
+  return { kind: 'layout', layout: parseLayout(data) };
+}
+
+export function downloadLibrary(layouts: StoredLayout[]) {
+  const file: LibraryFile = {
+    format: LIBRARY_FORMAT,
+    version: LAYOUT_VERSION,
+    exportedAt: new Date().toISOString(),
+    layouts: layouts.map((l) => ({ ...toFile(l), id: l.id, thumbnail: l.thumbnail })),
+  };
+  const blob = new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `second-label-backup-${file.exportedAt.slice(0, 10)}.json`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }

@@ -6,8 +6,8 @@ import { preloadBundledFonts } from './editor/fonts';
 import { designSize, isContinuous, mmToDots, printableMm } from './editor/geometry';
 import { renderRaster, renderThumbnail } from './editor/render';
 import type { Media, PrintTarget, PrinterDriver } from './printer/types';
-import { getLayout, newId, putLayout } from './storage/db';
-import { LAYOUT_FORMAT, LAYOUT_VERSION, downloadLayout, readLayoutFile, type LayoutFile } from './storage/layout-file';
+import { getLayout, importLayouts, listLayouts, newId, putLayout, requestPersistentStorage } from './storage/db';
+import { LAYOUT_FORMAT, LAYOUT_VERSION, downloadLayout, downloadLibrary, readImportFile, type LayoutFile } from './storage/layout-file';
 import { askBarcode, pickIcon } from './ui/dialogs';
 import { $, decorateIcons, h, num, toast } from './ui/dom';
 import { renderLibrary, type LibraryActions } from './ui/library';
@@ -252,12 +252,33 @@ function refreshLibrary() {
   renderLibrary(els.library, libraryActions);
 }
 
+document.querySelector('#libraryBackup')?.addEventListener('click', async () => {
+  try {
+    const all = await listLayouts();
+    if (!all.length) { toast('Die Bibliothek ist leer, es gibt nichts zu sichern.', 'info'); return; }
+    downloadLibrary(all);
+    toast(`${all.length} Layouts gesichert.`, 'ok');
+  } catch (e) {
+    toast(`Sicherung fehlgeschlagen: ${(e as Error).message}`, 'error');
+  }
+});
+
+void requestPersistentStorage();
+
 els.fileImport.addEventListener('change', async () => {
   const f = els.fileImport.files?.[0];
   els.fileImport.value = '';
   if (!f) return;
   try {
-    const l = await readLayoutFile(f);
+    const r = await readImportFile(f);
+    if (r.kind === 'library') {
+      const { added, updated, skipped } = await importLayouts(r.layouts);
+      refreshLibrary();
+      toast(`Sicherung eingelesen: ${added} neu, ${updated} aktualisiert, ${skipped} unverändert.`, 'ok');
+      return;
+    }
+    const l = r.layout;
+    if (!confirmDiscard()) return;
     await openLayout(l, null);
     setDirty(true);
     toast(`„${l.name}“ importiert. Mit „Speichern“ in die Bibliothek übernehmen.`, 'ok');

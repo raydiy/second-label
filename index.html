@@ -15,7 +15,7 @@
           <button data-cmd="new" data-icon="file-plus" title="Neues Layout">Neu</button>
           <button data-cmd="save" data-icon="save" title="In der Bibliothek speichern (Strg+S)">Speichern</button>
           <button data-cmd="saveAs" data-icon="save-all" title="Als neues Layout speichern">Kopie</button>
-          <button data-cmd="import" data-icon="upload" title="Layout-Datei (.json) importieren">Import</button>
+          <button data-cmd="import" data-icon="upload" title="Layout-Datei oder Bibliotheks-Sicherung (.json) importieren">Import</button>
           <button data-cmd="export" data-icon="download" title="Layout als .json exportieren">Export</button>
         </div>
         <div class="group" role="group" aria-label="Bearbeiten">
@@ -83,7 +83,10 @@
           <p id="saveState" class="muted small" role="status"></p>
         </section>
         <section class="library">
-          <h2>Bibliothek</h2>
+          <div class="library-head">
+            <h2>Bibliothek</h2>
+            <button id="libraryBackup" type="button" class="small" title="Alle Layouts als eine Sicherungsdatei herunterladen. Zum Wiederherstellen die Datei über „Import“ öffnen.">Alle sichern</button>
+          </div>
           <ul id="libraryList" class="library-list" aria-label="Gespeicherte Layouts"></ul>
         </section>
       </aside>
