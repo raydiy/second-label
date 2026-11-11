@@ -55,6 +55,9 @@ button:hover:not(:disabled) { background: var(--panel-2); border-color: var(--mu
 button:disabled { opacity: 0.45; cursor: default; }
 button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
+/* Save button while there are unsaved changes. */
+button.unsaved { background: var(--warn-bg); color: var(--warn-text); border-color: var(--warn-text); font-weight: 600; position: relative; }
+button.unsaved::after { content: ''; position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 0 2px var(--panel); }
 button.danger { color: var(--danger); }
 button.icon-only { padding: 5px 6px; }
 button[aria-pressed='true'] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }

@@ -157,6 +157,8 @@ function setDirty(d: boolean) {
     ? (d ? 'Ungespeicherte Änderungen' : 'Gespeichert')
     : (editor.isEmpty() ? 'Neues Layout' : 'Noch nicht gespeichert');
   document.title = `${d ? '* ' : ''}${els.name.value || 'Unbenannt'} · Second Label`;
+  const unsaved = currentId ? d : !editor.isEmpty();
+  document.querySelector('[data-cmd="save"]')?.classList.toggle('unsaved', unsaved);
 }
 els.name.addEventListener('input', () => setDirty(true));
 
