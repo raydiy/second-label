@@ -22,6 +22,7 @@ Please do not post the printer's serial number.
 | USB version | |
 | Device version | |
 | Configuration | |
+| Support status | <!-- verified / experimental / unknown, shown in the app --> |
 
 ### Interfaces
 

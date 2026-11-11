@@ -1,7 +1,8 @@
 // Calibration wizard: print the test pattern, measure with a ruler, save per-device values.
 // The math lives in src/printer/calibrate.ts, storage in src/printer/calibration.ts.
 import type { Calibration, Media, PrintTarget, PrinterDriver } from '../printer/types';
-import { DEFAULT_CALIBRATION, loadCalibration, resetCalibration, saveCalibration } from '../printer/calibration';
+import { loadCalibration, resetCalibration, saveCalibration } from '../printer/calibration';
+import { UNSUPPORTED_MESSAGE, printBlockReason } from '../printer/devices';
 import { measurementTargets, solveCalibration, type CalibrationInput, type CalibrationSolution } from '../printer/calibrate';
 import type { DiagnosticDriver } from '../printer/diagnostics';
 import { patternLengthMm, renderTestPattern } from '../printer/testpattern';
@@ -12,7 +13,8 @@ export type CalibrationDriver = PrinterDriver & DiagnosticDriver & { simulated?:
 
 export interface CalibrationHost {
   driver: CalibrationDriver;
-  media: Media[];
+  /** Media of the connected model (changes when a printer connects while the wizard is open). */
+  media(): Media[];
   currentMedia: Media;
   /** Connect via the app (updates the connection pill). Resolves true when connected. */
   connect(): Promise<boolean>;
@@ -33,7 +35,9 @@ const fmt = (v: number, d = 1) => num(v, d);
 
 export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
   const { driver } = host;
-  const start = calibratable(host.currentMedia) ? host.currentMedia : host.media.find(calibratable)!;
+  const start = calibratable(host.currentMedia) && host.media().some((m) => m.id === host.currentMedia.id)
+    ? host.currentMedia
+    : host.media().find(calibratable)!;
   const st = {
     step: 0,
     target: start.target as PrintTarget,
@@ -45,7 +49,7 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
     saved: false,
     busy: false,
   };
-  const media = () => host.media.find((m) => m.id === st.mediaId)!;
+  const media = () => host.media().find((m) => m.id === st.mediaId) ?? host.media().find(calibratable)!;
 
   const dlg = h('dialog', { class: 'calib-dialog', 'aria-label': 'Drucker kalibrieren' });
   const title = h('h2', {}, 'Drucker kalibrieren');
@@ -73,9 +77,12 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
     const dev = driver.describeDevice();
     if (!key) return h('p', { class: 'calib-device warn' }, 'Kein Drucker verbunden. Zum Drucken des Testmusters und zum Speichern bitte verbinden.');
     const stored = loadCalibration(key);
+    const spec = driver.deviceSpec();
+    if (!spec) return h('p', { class: 'calib-device warn' }, `Gerät: ${dev?.productName ?? 'unbekannt'} (${key}). ${UNSUPPORTED_MESSAGE}`);
     return h('p', { class: 'calib-device' },
       `Gerät: ${dev?.productName ?? 'unbekannt'} (${key}). `,
-      stored ? `Gespeicherte Kalibrierung vom ${new Date(stored.savedAt ?? '').toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}.` : 'Es gelten die Standardwerte.');
+      stored ? `Gespeicherte Kalibrierung vom ${new Date(stored.savedAt ?? '').toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}.` : 'Es gelten die Standardwerte.',
+      spec.status === 'experimental' ? ` Der ${spec.name} ist noch nicht getestet und startet ohne Korrekturen: hier einmal einmessen.` : '');
   };
 
   const render = () => {
@@ -89,18 +96,24 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
 
   function renderChoose(): Node[] {
     const seg = h('div', { class: 'segmented', role: 'radiogroup', 'aria-label': 'Druckwerk' });
-    for (const [v, label] of [['label', 'Etikett'], ['tape', 'Band']] as const) {
+    if (!host.media().some((m) => m.id === st.mediaId)) {
+      st.mediaId = media().id;
+      st.target = media().target;
+      st.printedWith = null;
+    }
+    const engines = (['label', 'tape'] as const).filter((t) => host.media().some((m) => m.target === t && calibratable(m)));
+    for (const [v, label] of ([['label', 'Etikett'], ['tape', 'Band']] as const).filter(([t]) => engines.includes(t))) {
       const input = h('input', { type: 'radio', name: 'calibEngine', value: v, checked: st.target === v });
       input.addEventListener('change', () => {
         st.target = v;
-        st.mediaId = host.media.find((m) => m.target === v && calibratable(m))!.id;
+        st.mediaId = host.media().find((m) => m.target === v && calibratable(m))!.id;
         st.printedWith = null;
         render();
       });
       seg.append(h('label', {}, input, ' ', h('span', {}, label)));
     }
     const select = h('select', { 'aria-label': 'Eingelegtes Medium' },
-      ...host.media.filter((m) => m.target === st.target && calibratable(m)).map((m) => h('option', { value: m.id }, m.name)));
+      ...host.media().filter((m) => m.target === st.target && calibratable(m)).map((m) => h('option', { value: m.id }, m.name)));
     select.value = st.mediaId;
     select.addEventListener('change', () => { st.mediaId = select.value; st.printedWith = null; render(); });
     const cal = driver.activeCalibration();
@@ -125,6 +138,11 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
   async function printPattern(): Promise<void> {
     if (!driver.isConnected() && !(await host.connect())) return;
     const m = media();
+    const blocked = printBlockReason(driver.deviceSpec(), m.target);
+    if (blocked) {
+      render();
+      throw new Error(blocked);
+    }
     st.busy = true;
     render();
     try {
@@ -277,6 +295,7 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
     if (!driver.deviceKey() && !(await host.connect())) return;
     const key = driver.deviceKey();
     if (!key) throw new Error('Kein Drucker verbunden.');
+    if (!driver.deviceSpec()) throw new Error(UNSUPPORTED_MESSAGE);
     saveCalibration(key, st.solution!.calibration);
     st.saved = true;
     toast('Kalibrierung gespeichert.', 'ok');
@@ -326,7 +345,7 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
         right.push(close, back, btn('Berechnen', () => {
           const input = collect();
           if (typeof input === 'string') { toast(input, 'error'); return; }
-          st.solution = solveCalibration(media(), st.printedWith ?? DEFAULT_CALIBRATION, input);
+          st.solution = solveCalibration(media(), st.printedWith ?? driver.activeCalibration(), input);
           st.saved = false;
           st.step = 3;
           render();

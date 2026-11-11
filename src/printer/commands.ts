@@ -1,6 +1,7 @@
-// Byte-level command builders for both engines of the DYMO LabelWriter DUO.
+// Byte-level command builders for the LabelWriter raster engine and the D1 tape engine.
 // Pure functions only (no I/O) so they can be unit tested with `bun test`.
-// Protocol reference and sources: docs/protocol.md.
+// Protocol reference and sources: docs/protocol.md. Per-model geometry comes from the device
+// table (devices.ts); the constants below are the DUO 0x001D values and the defaults.
 
 import type { MonoBitmap } from './types';
 
@@ -37,6 +38,25 @@ export const TAPE_NORMAL_LEADER_DOTS = 75;
 export const TAPE_MIN_PAGE_DOTS = 133;
 /** Minimum total label length the vendor driver ever produces: leader + min body + trailer. */
 export const TAPE_MIN_LABEL_DOTS = TAPE_NORMAL_LEADER_DOTS + TAPE_MIN_PAGE_DOTS + TAPE_NORMAL_LEADER_DOTS; // 283
+
+/** Tape engine geometry the job builder needs (a subset of TapeEngineSpec in devices.ts). */
+export interface TapeGeometry {
+  headDots: number;
+  headToCutterDots: number;
+  normalLeaderDots: number;
+  minPageDots: number;
+}
+
+/** "DUO Tape 128" geometry, the default for planTapeLayout and buildTapeJob. */
+export const DUO_TAPE_128_GEOMETRY: TapeGeometry = Object.freeze({
+  headDots: TAPE_HEAD_DOTS,
+  headToCutterDots: TAPE_HEAD_TO_CUTTER_DOTS,
+  normalLeaderDots: TAPE_NORMAL_LEADER_DOTS,
+  minPageDots: TAPE_MIN_PAGE_DOTS,
+});
+
+/** Shortest label cut to cut for a tape engine: leader + minimum body + trailer. */
+export const tapeMinLabelDots = (g: TapeGeometry): number => 2 * g.normalLeaderDots + g.minPageDots;
 
 // ---------------------------------------------------------------------------
 // Shared single commands
@@ -166,6 +186,8 @@ export interface LabelJobOptions {
   labelLengthDots: number | null;
   copies?: number;
   density?: Density;
+  /** Head width of the label engine in bytes. Default LABEL_MAX_BYTES_PER_LINE (672 dots). */
+  maxBytesPerLine?: number;
 }
 
 /**
@@ -179,7 +201,7 @@ export interface LabelJobOptions {
  * Trailing blank lines are not sent; the form feed moves to the next top of form.
  */
 export function buildLabelJob(bitmap: MonoBitmap, opts: LabelJobOptions): Uint8Array {
-  assertBitmap(bitmap, LABEL_MAX_BYTES_PER_LINE);
+  assertBitmap(bitmap, opts.maxBytesPerLine ?? LABEL_MAX_BYTES_PER_LINE);
   const copies = clampCopies(opts.copies);
   const w = new ByteWriter();
   w.put(cmdLabelResync());
@@ -220,6 +242,8 @@ export interface TapeJobOptions {
   copies?: number;
   /** ESC C tape type 0..12, default 0 (black on white/clear). */
   tapeType?: number;
+  /** Tape engine geometry. Default DUO_TAPE_128_GEOMETRY. */
+  geometry?: TapeGeometry;
 }
 
 /**
@@ -235,17 +259,18 @@ export interface TapeLayout {
   totalRows: number;
 }
 
-export function planTapeLayout(bitmap: MonoBitmap): TapeLayout {
+export function planTapeLayout(bitmap: MonoBitmap, g: TapeGeometry = DUO_TAPE_128_GEOMETRY): TapeLayout {
   let firstInk = -1;
   for (let r = 0; r < bitmap.height && firstInk < 0; r++) if (inkSpan(bitmap, r)) firstInk = r;
-  const prependRows = firstInk >= 0 && firstInk < TAPE_HEAD_TO_CUTTER_DOTS ? TAPE_HEAD_TO_CUTTER_DOTS - firstInk : 0;
+  const cutter = g.headToCutterDots;
+  const prependRows = firstInk >= 0 && firstInk < cutter ? cutter - firstInk : 0;
   const body = prependRows + bitmap.height;
-  const totalRows = Math.max(body, TAPE_MIN_LABEL_DOTS);
+  const totalRows = Math.max(body, tapeMinLabelDots(g));
   return { prependRows, appendRows: totalRows - body, totalRows };
 }
 
 /**
- * Full tape-engine job for the "DUO Tape 128" engine. Feed distances and command order were
+ * Full tape-engine job (default geometry: "DUO Tape 128"; numbers below are for it). Feed distances and command order were
  * cross-checked against dymo-cups-drivers (GPL-2.0, protocol reference only, no code included):
  *   16 zero bytes ("clean", ignored by the parser), ESC C type, then per copy:
  *   rows from line 61 onwards (lines 0..60 are already between head and cutter),
@@ -255,17 +280,19 @@ export function planTapeLayout(bitmap: MonoBitmap): TapeLayout {
  * change) + SYN + trimmed bytes. Only SYN is used; the tape engine does not support ETB.
  */
 export function buildTapeJob(bitmap: MonoBitmap, opts: TapeJobOptions = {}): Uint8Array {
-  assertBitmap(bitmap, TAPE_MAX_BYTES_PER_LINE);
+  const g = opts.geometry ?? DUO_TAPE_128_GEOMETRY;
+  const headBytes = g.headDots / 8;
+  assertBitmap(bitmap, headBytes);
   const copies = clampCopies(opts.copies);
-  const layout = planTapeLayout(bitmap);
+  const layout = planTapeLayout(bitmap, g);
   const w = new ByteWriter();
-  w.put(new Uint8Array(TAPE_MAX_BYTES_PER_LINE));
+  w.put(new Uint8Array(headBytes));
   w.put(cmdTapeType(opts.tapeType ?? 0));
   for (let c = 0; c < copies; c++) {
     let pendingBlank = 0;
     let lastTab = -1;
     let lastBpl = -1;
-    for (let lr = TAPE_HEAD_TO_CUTTER_DOTS; lr < layout.totalRows; lr++) {
+    for (let lr = g.headToCutterDots; lr < layout.totalRows; lr++) {
       const r = lr - layout.prependRows;
       const span = r >= 0 && r < bitmap.height ? inkSpan(bitmap, r) : null;
       if (!span) {
@@ -290,7 +317,7 @@ export function buildTapeJob(bitmap: MonoBitmap, opts: TapeJobOptions = {}): Uin
       w.byte(SYN);
       w.put(rowBytes(bitmap, r).subarray(first, last + 1));
     }
-    w.put(cmdTapeSkipLines(pendingBlank + TAPE_HEAD_TO_CUTTER_DOTS));
+    w.put(cmdTapeSkipLines(pendingBlank + g.headToCutterDots));
     w.put(cmdTapeCut());
   }
   return w.toUint8Array();

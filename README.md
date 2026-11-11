@@ -23,8 +23,16 @@ All data stays in your browser. Nothing is uploaded anywhere.
 | Printer | USB ID | Labels | Tape | Status |
 |---|---|---|---|---|
 | DYMO LabelWriter DUO (tape engine with 128 dots, D1 tape 6 to 24 mm) | `0922:001D` | yes | yes | tested |
+| DYMO LabelWriter 450 Duo | `0922:0023` | yes | yes (6 to 24 mm) | experimental, untested |
+| DYMO LabelWriter DUO (tape engine with 96 dots) | `0922:0017` | yes | yes (6 to 19 mm) | experimental, untested |
+| DYMO LabelWriter 450 | `0922:0020` | yes | no | experimental, untested |
+| DYMO LabelWriter 450 Turbo | `0922:0021` | yes | no | experimental, untested |
+| DYMO LabelWriter 400 | `0922:0019` | yes | no | experimental, untested |
+| DYMO LabelWriter 400 Turbo | `0922:001A` | yes | no | experimental, untested |
 
-Other models are not supported yet. Contributions with test results for further printers are welcome.
+"Experimental" means the model speaks the same protocol as the tested DUO according to the vendor technical reference and the open-source vendor driver, but nobody has printed with it in Second Label yet. These models start without any print offset correction: run "Kalibrieren" once before the first real print.
+
+Any other printer with the DYMO USB vendor ID can still connect. Printing and calibration are then disabled, but "Druckerprofil / Diagnose" works. If you own one of the experimental models, or another model, please send a report from "Druckerprofil / Diagnose" ("Auf GitHub melden"); that is how models move from experimental to tested. Background and the model list are in [docs/printer-families.md](docs/printer-families.md).
 
 ## Requirements
 

@@ -1,9 +1,13 @@
-// WebUSB driver for the DYMO LabelWriter DUO (first generation, VID 0x0922 PID 0x001D).
+// WebUSB driver for LabelWriter models with the LW raster label engine and/or the D1 tape engine.
 //
-// Device layout (measured on the real unit, docs/protocol.md "Device probe"):
+// Which engines a model has, their USB interface, head width and tape constants come from the
+// device table (devices.ts), selected by product id on connect. Verified on the DUO 0x001D
+// (docs/protocol.md "Device probe"):
 //   interface 0  "LabelWriter DUO Label"     bulk OUT 0x01 / IN 0x81, wMaxPacketSize 16
 //   interface 1  "LabelWriter DUO Tape 128"  bulk OUT 0x02 / IN 0x82, wMaxPacketSize 64
-// Endpoints are read from the descriptors at runtime, only the interface numbers are fixed.
+// Endpoints are read from the descriptors at runtime, only the interface numbers come from the table.
+// Any device of vendor 0x0922 can connect; a model without table entry only offers diagnostics
+// (descriptors and IEEE 1284 IDs via control transfers), no data is sent to its endpoints.
 //
 // The USB types below are structural subsets of the WebUSB API so this file compiles without
 // @types/w3c-web-usb and can be exercised in tests with a fake device.
@@ -11,12 +15,11 @@
 import type { Calibration, DesignRaster, PrintOptions, PrintTarget, PrinterDriver, PrinterStatus } from './types';
 import { buildLabelJob, buildTapeJob, cmdStatus, decodeLabelStatus, decodeTapeStatus } from './commands';
 import { mmToDots, rasterize, type DitherMode } from './raster';
-import { DEFAULT_CALIBRATION, deviceKey, loadCalibration } from './calibration';
+import { deviceKey, loadCalibration } from './calibration';
 import { stripSerialFields, type DeviceIdEntry, type StatusSnapshot, type UsbDeviceSummary } from './diagnostics';
+import { DUO_128, DYMO_VENDOR_ID, NEUTRAL_CALIBRATION, findDevice, printBlockReason, type DeviceSpec } from './devices';
 
-export const DYMO_VENDOR_ID = 0x0922;
-export const DUO_PRODUCT_ID = 0x001d;
-export const ENGINE_INTERFACE: Record<PrintTarget, number> = { label: 0, tape: 1 };
+export { DYMO_VENDOR_ID };
 
 // --- minimal WebUSB surface ---------------------------------------------------------------
 
@@ -91,7 +94,7 @@ export interface WebUsbDriverOptions {
   statusTimeoutMs?: number;
   /**
    * Stored calibration for a device key ("0922:001d"), consulted on every print.
-   * Defaults to localStorage (calibration.ts); return null to use DEFAULT_CALIBRATION.
+   * Defaults to localStorage (calibration.ts); return null to use the model's table default.
    */
   calibrationFor?: (deviceKey: string) => Calibration | null;
 }
@@ -105,6 +108,7 @@ interface EngineIo {
 
 export class WebUsbPrinterDriver implements PrinterDriver {
   private device: UsbDeviceLike | null = null;
+  private spec: DeviceSpec | null = null;
   private claimed = new Set<number>();
   private queue: Promise<unknown> = Promise.resolve();
   private readonly opts: Required<Omit<WebUsbDriverOptions, 'usb'>> & { usb?: UsbLike };
@@ -141,8 +145,9 @@ export class WebUsbPrinterDriver implements PrinterDriver {
   }
 
   async reconnect(): Promise<boolean> {
-    const devices = await this.usb().getDevices();
-    const device = devices.find((d) => d.vendorId === DYMO_VENDOR_ID);
+    const devices = (await this.usb().getDevices()).filter((d) => d.vendorId === DYMO_VENDOR_ID);
+    // Prefer a model from the device table when several printers were permitted.
+    const device = devices.find((d) => findDevice(d.vendorId, d.productId)) ?? devices[0];
     if (!device) return false;
     await this.attach(device);
     return true;
@@ -163,6 +168,7 @@ export class WebUsbPrinterDriver implements PrinterDriver {
       if (device.opened) await device.close();
     });
     this.device = null;
+    this.spec = null;
   }
 
   isConnected(): boolean {
@@ -171,7 +177,15 @@ export class WebUsbPrinterDriver implements PrinterDriver {
 
   async getStatus(target: PrintTarget): Promise<PrinterStatus> {
     if (!this.device) return { connected: false, message: 'Not connected' };
+    // Unknown model or missing engine: answer without sending anything to the device.
+    const blocked = printBlockReason(this.spec, target);
+    if (blocked) return { connected: true, ready: false, message: blocked };
     return this.serialize(() => this.readStatus(target));
+  }
+
+  /** Device table entry of the connected printer; null when not connected or unknown model. */
+  deviceSpec(): DeviceSpec | null {
+    return this.spec;
   }
 
   /** IEEE 1284 Device ID of an engine, e.g. "MFG:DYMO;...;MDL:LabelWriter DUO Tape 128;...". */
@@ -191,10 +205,13 @@ export class WebUsbPrinterDriver implements PrinterDriver {
     return this.device ? deviceKey(this.device.vendorId, this.device.productId) : null;
   }
 
-  /** Calibration used for the next print: stored for this model, else the defaults. */
+  /** Calibration used for the next print: stored for this model, else the model's table default. */
   activeCalibration(): Calibration {
     const key = this.deviceKey();
-    return (key && this.opts.calibrationFor(key)) || DEFAULT_CALIBRATION;
+    const stored = key ? this.opts.calibrationFor(key) : null;
+    if (stored) return stored;
+    if (!this.device) return DUO_128.calibration; // nothing connected: the reference device
+    return this.spec?.calibration ?? NEUTRAL_CALIBRATION;
   }
 
   /** USB descriptors of the connected device. Never includes the serial number. */
@@ -269,10 +286,14 @@ export class WebUsbPrinterDriver implements PrinterDriver {
 
   async print(raster: DesignRaster, options: PrintOptions = {}): Promise<void> {
     const target = raster.media.target;
+    this.requireDevice();
+    const blocked = printBlockReason(this.spec, target);
+    if (blocked) throw new Error(blocked);
     const bytes = buildJob(raster, options, {
       tapeType: this.opts.tapeType,
       dither: this.opts.dither,
       calibration: this.activeCalibration(),
+      device: this.spec!,
     });
     await this.serialize(async () => {
       const status = await this.readStatus(target);
@@ -295,6 +316,7 @@ export class WebUsbPrinterDriver implements PrinterDriver {
     if (!device.opened) await device.open();
     if (!device.configuration) await device.selectConfiguration(1);
     this.device = device;
+    this.spec = findDevice(device.vendorId, device.productId);
     this.claimed.clear();
   }
 
@@ -312,9 +334,11 @@ export class WebUsbPrinterDriver implements PrinterDriver {
 
   private async engine(target: PrintTarget): Promise<EngineIo> {
     const device = this.requireDevice();
-    const n = ENGINE_INTERFACE[target];
+    const spec = this.spec?.engines[target];
+    if (!spec) throw new Error(printBlockReason(this.spec, target) ?? `No ${target} engine`);
+    const n = spec.interfaceNumber;
     const iface = device.configuration?.interfaces.find((i) => i.interfaceNumber === n);
-    if (!iface) throw new Error(`Interface ${n} (${target}) not found. Is this a LabelWriter DUO?`);
+    if (!iface) throw new Error(`Interface ${n} (${target}) not found on ${this.spec!.name}.`);
     const eps = iface.alternate.endpoints;
     const out = eps.find((e) => e.direction === 'out' && e.type === 'bulk');
     const inn = eps.find((e) => e.direction === 'in' && e.type === 'bulk');
@@ -364,22 +388,36 @@ export class WebUsbPrinterDriver implements PrinterDriver {
   }
 }
 
-/** Rasterize and encode a job. Exported so the editor can preview byte counts without a device. */
+/**
+ * Rasterize and encode a job for one device (default: the DUO 0x001D). Exported so the editor
+ * can preview byte counts without a device. Geometry comes from the device table entry.
+ */
 export function buildJob(
   raster: DesignRaster,
   options: PrintOptions = {},
-  extra: { tapeType?: number; dither?: DitherMode; calibration?: Calibration } = {},
+  extra: { tapeType?: number; dither?: DitherMode; calibration?: Calibration; device?: DeviceSpec } = {},
 ): Uint8Array {
-  const bitmap = rasterize(raster, { lengthMm: options.lengthMm, dither: extra.dither, calibration: extra.calibration });
   const { media } = raster;
+  const device = extra.device ?? DUO_128;
+  const blocked = printBlockReason(device, media.target);
+  if (blocked) throw new Error(blocked);
+  const engine = device.engines[media.target]!;
+  if (media.dpi !== engine.dpi) throw new Error(`${media.name}: ${media.dpi} dpi, ${device.name} ${media.target} engine prints ${engine.dpi} dpi`);
+  const bitmap = rasterize(raster, {
+    lengthMm: options.lengthMm,
+    dither: extra.dither,
+    calibration: extra.calibration ?? device.calibration,
+    headDots: engine.headDots,
+  });
   if (media.target === 'label') {
     return buildLabelJob(bitmap, {
       labelLengthDots: media.lengthMm === null ? null : mmToDots(media.lengthMm, media.dpi),
       copies: options.copies,
       density: options.density,
+      maxBytesPerLine: engine.headDots / 8,
     });
   }
-  return buildTapeJob(bitmap, { copies: options.copies, tapeType: extra.tapeType });
+  return buildTapeJob(bitmap, { copies: options.copies, tapeType: extra.tapeType, geometry: device.engines.tape });
 }
 
 export function labelStatus(raw: Uint8Array): PrinterStatus {

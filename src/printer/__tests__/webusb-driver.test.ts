@@ -4,6 +4,7 @@ import { findMedia } from '../media';
 import { mmToDots } from '../raster';
 import { DEFAULT_CALIBRATION, cloneCalibration } from '../calibration';
 import type { Calibration } from '../types';
+import { NEUTRAL_CALIBRATION, UNSUPPORTED_MESSAGE } from '../devices';
 
 /** Fake DUO with the descriptor layout measured on the real unit (docs/protocol.md). */
 class FakeDuo implements UsbDeviceLike {
@@ -189,5 +190,69 @@ describe('WebUsbPrinterDriver: calibration and diagnostics', () => {
     await driver.getStatus('tape');
     expect(driver.lastStatuses().tape).toMatchObject({ raw: [0xc0], ready: true, message: 'Ready' });
     expect(driver.lastStatuses().label).toBeUndefined();
+  });
+});
+
+describe('WebUsbPrinterDriver: device table', () => {
+  /** Fake single-interface model (450 family) or unknown PID, built from the DUO fake. */
+  const fake = (productId: number, interfaces: 1 | 2 = 1) => {
+    const dev = new FakeDuo();
+    dev.productId = productId;
+    dev.productName = 'Test printer';
+    if (interfaces === 1) dev.configuration.interfaces = dev.configuration.interfaces.slice(0, 1);
+    const usb: UsbLike = { requestDevice: async () => dev, getDevices: async () => [dev] };
+    return { dev, driver: new WebUsbPrinterDriver({ usb, calibrationFor: () => null }) };
+  };
+
+  test('label-only 450: label status and print on interface 0, tape refused without USB traffic', async () => {
+    const { dev, driver } = fake(0x0020);
+    await driver.connect();
+    expect(driver.deviceSpec()?.name).toBe('LabelWriter 450');
+    expect(driver.activeCalibration()).toBe(NEUTRAL_CALIBRATION);
+    expect((await driver.getStatus('label')).ready).toBe(true);
+    const tape = await driver.getStatus('tape');
+    expect(tape).toMatchObject({ connected: true, ready: false });
+    expect(tape.message).toContain('kein Banddruckwerk');
+    expect(dev.writes.length).toBe(1); // only the label status request
+    const t = findMedia('d1-12mm')!;
+    await expect(driver.print({ image: blankImage(100, mmToDots(12, 180)), media: t })).rejects.toThrow('kein Banddruckwerk');
+    const m = findMedia('lw-99010')!;
+    await driver.print({ image: blankImage(10, 10), media: m });
+    expect(dev.writes.every((w) => w.ep === 1)).toBe(true);
+    expect([...dev.claimedIfaces]).toEqual([0]);
+  });
+
+  test('unknown PID: connects, describes and reads IDs, but sends nothing and refuses to print', async () => {
+    const { dev, driver } = fake(0x0028);
+    (dev as FakeDuo & { controlTransferIn: UsbDeviceLike['controlTransferIn'] }).controlTransferIn = async () => {
+      const text = new TextEncoder().encode('MFG:DYMO;MDL:LabelWriter 550;');
+      const buf = new Uint8Array(text.length + 2);
+      buf[1] = buf.length;
+      buf.set(text, 2);
+      return { status: 'ok', data: new DataView(buf.buffer) };
+    };
+    await driver.connect();
+    expect(driver.isConnected()).toBe(true);
+    expect(driver.deviceSpec()).toBeNull();
+    expect(driver.deviceKey()).toBe('0922:0028');
+    expect(driver.describeDevice()!.productId).toBe(0x0028);
+    expect(await driver.readDeviceIds()).toEqual([{ interface: 0, value: 'MFG:DYMO;MDL:LabelWriter 550;' }]);
+    expect((await driver.getStatus('label')).message).toBe(UNSUPPORTED_MESSAGE);
+    await expect(driver.print({ image: blankImage(10, 10), media: findMedia('lw-99010')! })).rejects.toThrow(UNSUPPORTED_MESSAGE);
+    expect(dev.writes.length).toBe(0);
+    expect(driver.activeCalibration()).toBe(NEUTRAL_CALIBRATION);
+  });
+
+  test('without a connection the reference calibration is reported', () => {
+    expect(fake(0x0020).driver.activeCalibration()).toBe(DEFAULT_CALIBRATION);
+  });
+
+  test('reconnect prefers a model from the table over an unknown one', async () => {
+    const unknown = fake(0x0028).dev;
+    const known = fake(0x0023, 2).dev;
+    const usb: UsbLike = { requestDevice: async () => unknown, getDevices: async () => [unknown, known] };
+    const driver = new WebUsbPrinterDriver({ usb });
+    expect(await driver.reconnect()).toBe(true);
+    expect(driver.deviceSpec()?.productId).toBe(0x0023);
   });
 });

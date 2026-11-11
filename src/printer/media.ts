@@ -1,4 +1,6 @@
-// Media catalogue for the DYMO LabelWriter DUO (label engine + "Tape 128" engine).
+// Media catalogue. MEDIA is the full list for the DUO 0x001D (label engine + "Tape 128" engine)
+// and is what the editor offers while no printer is connected; mediaForDevice() narrows it to
+// the engines and tape widths of a connected model from the device table.
 //
 // Sources (full citations in docs/protocol.md, "Media"):
 //   [DS]  DYMO LabelWriter label datasheet, Farnell, (c) 2022 Newell Brands:
@@ -18,7 +20,16 @@
 // Nominal sizes come from [DS] where DYMO lists a metric size, otherwise from the PPD page size.
 
 import type { Media } from './types';
-import { LABEL_DPI, LABEL_HEAD_DOTS, TAPE_DPI, TAPE_HEAD_DOTS, TAPE_MIN_LABEL_DOTS, TAPE_NORMAL_LEADER_DOTS } from './commands';
+import type { DeviceSpec, TapeEngineSpec } from './devices';
+import {
+  LABEL_DPI,
+  LABEL_HEAD_DOTS,
+  TAPE_DPI,
+  TAPE_HEAD_DOTS,
+  TAPE_MIN_LABEL_DOTS,
+  TAPE_NORMAL_LEADER_DOTS,
+  tapeMinLabelDots,
+} from './commands';
 
 const PT = 25.4 / 72; // mm per PostScript point
 const r2 = (v: number) => Math.round(v * 100) / 100;
@@ -70,9 +81,18 @@ function label(
   };
 }
 
-/** Printable band height on tape per [PPD] lwduot2.ppd (urx - llx), centred on the tape. */
-function tape(widthMm: number, bandPt: number): Media {
-  const band = Math.min(bandPt * PT, TAPE_HEAD_MM);
+/**
+ * Printable band height on tape per [PPD] lwduot2.ppd (urx - llx), centred on the tape, clipped
+ * to the head width. Other tape engines pass their head width and margins.
+ */
+function tape(
+  widthMm: number,
+  bandPt: number,
+  headDots = TAPE_HEAD_DOTS,
+  marginMm = TAPE_MARGIN_MM,
+  minLengthMm = TAPE_MIN_LENGTH_MM,
+): Media {
+  const band = Math.min(bandPt * PT, (headDots / TAPE_DPI) * 25.4);
   return {
     id: `d1-${widthMm}mm`,
     target: 'tape',
@@ -82,16 +102,25 @@ function tape(widthMm: number, bandPt: number): Media {
     lengthMm: null,
     dpi: TAPE_DPI,
     printable: {
-      xMm: TAPE_MARGIN_MM,
+      xMm: marginMm,
       yMm: r2((widthMm - band) / 2),
       widthMm: 0,
       heightMm: r2(band),
     },
     notes:
       `Continuous. Printable band ${r2(band)} mm (${Math.round((band / 25.4) * TAPE_DPI)} dots) centred on the tape. ` +
-      `Minimum label length ${TAPE_MIN_LENGTH_MM} mm cut to cut. Tape colour is set with ESC C (tape type).`,
+      `Minimum label length ${minLengthMm} mm cut to cut. Tape colour is set with ESC C (tape type).`,
   };
 }
+
+/** D1 tape width in mm and printable band in pt per [PPD] lwduot2.ppd (urx - llx). */
+const TAPE_BANDS_PT: [number, number][] = [
+  [6, 16.0 - 1.6],
+  [9, 22.8 - 2.8],
+  [12, 30.0 - 4.4],
+  [19, 47.2 - 7.2],
+  [24, 59.6 - 8.4],
+];
 
 export const MEDIA: Media[] = [
   // --- LabelWriter labels (die-cut), sizes [DS], margins [PPD lwduol.ppd] -----------------
@@ -133,13 +162,27 @@ export const MEDIA: Media[] = [
     'Continuous. Printable band limited by the head; length chosen per print (PrintOptions.lengthMm).'),
 
   // --- D1 tape, widths [TR], printable band [PPD lwduot2.ppd], margins [DRV] ---------------
-  tape(6, 16.0 - 1.6),
-  tape(9, 22.8 - 2.8),
-  tape(12, 30.0 - 4.4),
-  tape(19, 47.2 - 7.2),
-  tape(24, 59.6 - 8.4),
+  ...TAPE_BANDS_PT.map(([w, band]) => tape(w, band)),
 ];
 
 export function findMedia(id: string): Media | undefined {
   return MEDIA.find((m) => m.id === id);
+}
+
+/**
+ * Media a connected model can print: labels only with a label engine, tape only with a tape
+ * engine and only up to its widest cassette. Tape bands and margins follow that engine (a
+ * 96-dot head clips the band of wide tapes). The DUO 0x001D gets MEDIA unchanged.
+ */
+export function mediaForDevice(spec: DeviceSpec): Media[] {
+  const out: Media[] = spec.engines.label ? MEDIA.filter((m) => m.target === 'label') : [];
+  const t = spec.engines.tape;
+  if (t) out.push(...tapeMediaFor(t));
+  return out;
+}
+
+function tapeMediaFor(t: TapeEngineSpec): Media[] {
+  const margin = r2((t.normalLeaderDots / t.dpi) * 25.4);
+  const minLength = r2((tapeMinLabelDots(t) / t.dpi) * 25.4);
+  return TAPE_BANDS_PT.filter(([w]) => w <= t.maxTapeMm).map(([w, band]) => tape(w, band, t.headDots, margin, minLength));
 }

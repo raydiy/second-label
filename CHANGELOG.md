@@ -2,6 +2,15 @@
 
 All notable changes to Second Label. Versions follow [Semantic Versioning](https://semver.org): new features raise the middle number, fixes the last one.
 
+## Unreleased
+
+- Device table (`src/printer/devices.ts`): engines, USB interfaces, head widths and tape constants per model instead of hardcoded DUO values. The DUO `0922:001D` prints byte-identically to 0.3.0 (golden test)
+- Experimental, untested support for LabelWriter 450 Duo (`0023`), DUO with 96-dot tape (`0017`), 450 (`0020`), 450 Turbo (`0021`), 400 (`0019`) and 400 Turbo (`001A`). They start from a neutral calibration; the app shows a hint to calibrate and to send a report
+- Label-only models: tape engine and tape media are not offered; a tape medium is switched to a label when such a printer connects. The 96-dot DUO offers tape up to 19 mm with the printable band limited to its head
+- Unknown printers of the same vendor still connect and can send a diagnostic report, printing and calibration are disabled with a message
+- Diagnostic report: new "Support status" field (verified, experimental, unknown)
+- Developer: `?mock=<pid>` (hex, e.g. `?mock=0020`) simulates a model from the table or an unknown one
+
 ## 0.3.0 (2026-11-11)
 
 - Calibration wizard ("Kalibrieren"): prints a test pattern with numbered 10 mm ticks, asks for a few ruler measurements, shows old and new values and saves them per printer model (USB vendor and product id, never the serial number). Every print uses the stored values; "Auf Standard zurücksetzen" restores the defaults. Labels: feed start, feed scale and position across the head. Tape: centring per tape width

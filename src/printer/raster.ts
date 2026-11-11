@@ -14,8 +14,9 @@
 // Placement across the head:
 //   label: the label edge sits at head dot 0 (every DUO Label PageSize has cupsInteger0 0,
 //          i.e. no offset, in dymo-cups-drivers lwduol.ppd). Dots beyond 671 are dropped.
-//   tape:  the tape is centred on the 128-dot head (the vendor CUPS driver also centres the
-//          raster line), plus an optional per-width correction.
+//   tape:  the tape is centred on the tape head (128 dots on the DUO; the vendor CUPS driver
+//          also centres the raster line), plus an optional per-width correction.
+// Head widths default to the DUO 0x001D; other models pass theirs (RasterizeOptions.headDots).
 
 import type { Calibration, DesignRaster, Media, MonoBitmap } from './types';
 import { LABEL_DPI, LABEL_HEAD_DOTS, TAPE_DPI, TAPE_HEAD_DOTS } from './commands';
@@ -32,8 +33,10 @@ export interface RasterizeOptions {
    * Die-cut labels always use media.lengthMm.
    */
   lengthMm?: number;
-  /** Per-device calibration. Defaults to DEFAULT_CALIBRATION (René's DUO, PID 0x001D). */
+  /** Per-device calibration. Defaults to DEFAULT_CALIBRATION (the DUO 0x001D values). */
   calibration?: Calibration;
+  /** Dots across the head of the engine that prints this medium. Defaults to the DUO engines. */
+  headDots?: number;
 }
 
 /**
@@ -90,11 +93,17 @@ export function tapeCorrectionDots(cal: Calibration, widthMm: number): number {
 }
 
 /** Head dot that portrait column 0 of the design lands on. */
-export function headOffsetDots(media: Media, designHeightDots: number, cal: Calibration = DEFAULT_CALIBRATION): number {
+export function headOffsetDots(
+  media: Media,
+  designHeightDots: number,
+  cal: Calibration = DEFAULT_CALIBRATION,
+  head: number = headDots(media),
+): number {
   if (media.target === 'label') return cal.label.headOffsetDots;
-  return Math.round(TAPE_HEAD_DOTS / 2 - designHeightDots / 2) + tapeCorrectionDots(cal, media.widthMm);
+  return Math.round(head / 2 - designHeightDots / 2) + tapeCorrectionDots(cal, media.widthMm);
 }
 
+/** Head width of the DUO engine for this medium (672 label / 128 tape). */
 export function headDots(media: Media): number {
   return media.target === 'label' ? LABEL_HEAD_DOTS : TAPE_HEAD_DOTS;
 }
@@ -158,19 +167,20 @@ export function toMonoDesign(
 
 /**
  * Rotate, binarize and place a design raster on the print head.
- * Result: width = head dots (672 label / 128 tape), height = feed rows.
+ * Result: width = head dots (opts.headDots, default 672 label / 128 tape), height = feed rows.
  * Design columns beyond the feed length are cropped, missing columns stay blank.
  */
 export function rasterize(raster: DesignRaster, opts: RasterizeOptions = {}): MonoBitmap {
   const { image, media } = raster;
-  const width = headDots(media);
+  const width = opts.headDots ?? headDots(media);
+  if (!Number.isInteger(width) || width <= 0 || width % 8 !== 0) throw new RangeError(`head width ${width} must be a positive multiple of 8`);
   const bytesPerRow = width / 8;
   const height = feedRows(media, image, opts.lengthMm);
   const data = new Uint8Array(bytesPerRow * height);
   const mono = toMonoDesign(image, opts.dither ?? 'threshold', opts.threshold ?? 128);
   const H = image.height;
   const cal = opts.calibration ?? DEFAULT_CALIBRATION;
-  const offset = headOffsetDots(media, H, cal);
+  const offset = headOffsetDots(media, H, cal, width);
   const isLabel = media.target === 'label';
   const W = image.width;
   for (let y = 0; y < H; y++) {

@@ -5,6 +5,7 @@
 // IEEE 1284 Device ID strings. Calibration is stored per vendorId:productId for the same reason.
 
 import type { Calibration, Media, PrintTarget } from './types';
+import type { DeviceSpec } from './devices';
 
 export const REPORT_FORMAT = 'second-label-printer-report';
 export const REPORT_VERSION = 1;
@@ -59,6 +60,8 @@ export interface StatusSnapshot {
 /** Driver capabilities the diagnostic view and the calibration wizard rely on. */
 export interface DiagnosticDriver {
   deviceKey(): string | null;
+  /** Device table entry of the connected printer; null when not connected or unknown model. */
+  deviceSpec(): DeviceSpec | null;
   activeCalibration(): Calibration;
   describeDevice(): UsbDeviceSummary | null;
   readDeviceIds(): Promise<DeviceIdEntry[]>;
@@ -73,6 +76,8 @@ export interface PrinterReport {
   userAgent: string;
   simulated: boolean;
   device: (Omit<UsbDeviceSummary, 'vendorId' | 'productId'> & { vendorId: string; productId: string }) | null;
+  /** Device table match: model name and status, "unknown" when the product id has no entry. */
+  support: { model: string | null; status: 'verified' | 'experimental' | 'unknown' } | null;
   deviceIds: DeviceIdEntry[];
   lastStatus: Partial<Record<PrintTarget, { raw: string; ready: boolean; message: string; at: string }>>;
   calibration: { deviceKey: string | null; source: 'stored' | 'default'; savedAt: string | null; values: Calibration };
@@ -96,6 +101,8 @@ export interface ReportInput {
   userAgent: string;
   simulated?: boolean;
   device: UsbDeviceSummary | null;
+  /** Table entry of the connected device (null = unknown model or nothing connected). */
+  spec?: DeviceSpec | null;
   deviceIds: DeviceIdEntry[];
   lastStatus: Partial<Record<PrintTarget, StatusSnapshot>>;
   calibration: { deviceKey: string | null; stored: boolean; savedAt: string | null; values: Calibration };
@@ -117,6 +124,7 @@ export function buildReport(i: ReportInput): PrinterReport {
     userAgent: i.userAgent,
     simulated: !!i.simulated,
     device: i.device ? { ...i.device, vendorId: hex(i.device.vendorId), productId: hex(i.device.productId) } : null,
+    support: i.device ? (i.spec ? { model: i.spec.name, status: i.spec.status } : { model: null, status: 'unknown' }) : null,
     deviceIds: i.deviceIds.map((d) => ({ ...d, value: d.value === null ? null : stripSerialFields(d.value) })),
     lastStatus,
     calibration: {
@@ -153,6 +161,7 @@ export function reportMarkdown(r: PrinterReport, includeJson = true): string {
     L.push(`| Product name | ${cell(d.productName)} |`, `| Manufacturer | ${cell(d.manufacturerName)} |`);
     L.push(`| USB version | ${cell(d.usbVersion)} |`, `| Device version | ${cell(d.deviceVersion)} |`);
     L.push(`| Configuration | ${cell(d.configurationValue)} |`);
+    if (r.support) L.push(`| Support status | ${r.support.status}${r.support.model ? ` (${r.support.model})` : ''} |`);
     L.push('', '### Interfaces', '');
     L.push('| # | Class | Name | Endpoints |', '|---|---|---|---|');
     for (const i of d.interfaces) {

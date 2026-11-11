@@ -6,6 +6,8 @@ import { preloadBundledFonts } from './editor/fonts';
 import { designSize, isContinuous, mmToDots, printableMm } from './editor/geometry';
 import { renderRaster, renderThumbnail } from './editor/render';
 import type { Media, PrintTarget } from './printer/types';
+import { UNSUPPORTED_MESSAGE, printBlockReason } from './printer/devices';
+import { mediaForDevice } from './printer/media';
 import { getLayout, importLayouts, listLayouts, newId, putLayout, requestPersistentStorage } from './storage/db';
 import { LAYOUT_FORMAT, LAYOUT_VERSION, downloadLayout, downloadLibrary, readImportFile, type LayoutFile } from './storage/layout-file';
 import { askBarcode, pickIcon } from './ui/dialogs';
@@ -19,7 +21,9 @@ import { APP_BUILD_DATE, APP_COMMIT, APP_VERSION } from './build-info';
 // ---------- state ----------
 
 const driver: CalibrationDriver = new Driver();
-const mediaById = (id: string) => MEDIA.find((m) => m.id === id);
+/** Media the connected model can print (all of MEDIA while nothing or an unknown model is connected). */
+let available: Media[] = MEDIA;
+const mediaById = (id: string) => available.find((m) => m.id === id) ?? MEDIA.find((m) => m.id === id);
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
@@ -84,7 +88,7 @@ function setEngineRadio(t: PrintTarget) {
 }
 
 function fillMediaSelect(target: PrintTarget, selectedId?: string) {
-  const list = MEDIA.filter((m) => m.target === target);
+  const list = available.filter((m) => m.target === target);
   els.mediaSelect.replaceChildren(...list.map((m) => h('option', { value: m.id }, m.name)));
   els.mediaSelect.value = selectedId && list.some((m) => m.id === selectedId) ? selectedId : list[0]?.id ?? '';
   els.tapeOptions.hidden = target !== 'tape';
@@ -215,7 +219,7 @@ async function openLayout(l: LayoutFile, id: string | null) {
   let media = mediaById(l.mediaId);
   if (!media) {
     const t = (l.mediaInfo?.target as PrintTarget) ?? 'label';
-    media = MEDIA.find((m) => m.target === t) ?? MEDIA[0];
+    media = available.find((m) => m.target === t) ?? available[0];
     toast(`Medium „${l.mediaInfo?.name ?? l.mediaId}“ ist hier unbekannt, verwende „${media.name}“.`, 'error');
   }
   if (l.tape) { editor.tapeMode = l.tape.mode; editor.tapeFixedMm = l.tape.lengthMm; }
@@ -329,7 +333,47 @@ function showBrowserNotices() {
     notes.push('Dieser Browser unterstützt kein WebUSB (z. B. Safari oder Firefox). Zum Drucken bitte Chrome, Edge, Vivaldi oder Brave verwenden. Gestalten, Speichern und die Vorschau funktionieren trotzdem.');
   }
   if (driver.simulated) notes.push('Simulationsmodus (?mock): Es wird kein echter Drucker angesprochen, „Drucken“ zeigt das Druckbild an.');
+  const device = deviceNotice();
+  if (device) notes.push(device);
   els.notices.replaceChildren(...notes.map((n) => h('div', { class: 'notice', role: 'note' }, n)));
+}
+
+/** Hint for a connected model that is not verified: untested table entry or unknown model. */
+function deviceNotice(): string | null {
+  if (!driver.isConnected()) return null;
+  const spec = driver.deviceSpec();
+  if (!spec) {
+    const d = driver.describeDevice();
+    return `Verbunden: ${d?.productName ?? 'unbekanntes Gerät'} (${driver.deviceKey() ?? '?'}). ${UNSUPPORTED_MESSAGE} Drucken und Kalibrieren sind für dieses Gerät gesperrt.`;
+  }
+  if (spec.status === 'experimental') {
+    return `Verbunden: ${spec.name}. Dieses Modell ist noch nicht getestet. Bitte vor dem ersten Druck über „Kalibrieren“ einmessen und über „Druckerprofil / Diagnose“ melden, ob es funktioniert.`;
+  }
+  return null;
+}
+
+/** Adapt engines and media to the connected model (or back to the full list). */
+function applyDevice() {
+  const spec = driver.isConnected() ? driver.deviceSpec() : null;
+  available = spec ? mediaForDevice(spec) : MEDIA;
+  const targets = new Set(available.map((m) => m.target));
+  document.querySelectorAll<HTMLInputElement>('input[name=engine]').forEach((r) => {
+    const off = !targets.has(r.value as PrintTarget);
+    r.disabled = off;
+    r.closest('label')!.title = off ? `${spec?.name ?? 'Dieser Drucker'} hat kein ${r.value === 'tape' ? 'Band' : 'Etiketten'}druckwerk.` : '';
+  });
+  const cur = editor.media;
+  const match = available.find((m) => m.id === cur.id);
+  if (!match) {
+    const next = available.find((m) => m.target === cur.target) ?? available[0];
+    applyMedia(next);
+    toast(`„${cur.name}“ passt nicht zum ${spec?.name ?? 'Drucker'}, Medium auf „${next.name}“ umgestellt.`, 'info');
+  } else if (JSON.stringify(match) !== JSON.stringify(cur)) {
+    applyMedia(match); // same medium, different geometry (e.g. a narrower tape head)
+  }
+  setEngineRadio(editor.media.target);
+  fillMediaSelect(editor.media.target, editor.media.id);
+  showBrowserNotices();
 }
 
 function usbErrorText(e: unknown): string {
@@ -348,6 +392,7 @@ function setConn(state: 'off' | 'on' | 'err', text?: string) {
   els.conn.textContent = text ?? (state === 'on' ? (driver.simulated ? 'Verbunden (Simulation)' : 'Verbunden') : 'Nicht verbunden');
   els.connectBtn.lastChild!.textContent = state === 'on' ? 'Trennen' : 'Verbinden';
   els.connectBtn.dataset.cmd = state === 'on' ? 'disconnect' : 'connect';
+  applyDevice();
 }
 
 async function initConnection() {
@@ -403,6 +448,8 @@ async function print() {
   btn.disabled = true;
   try {
     const media = editor.media;
+    const blocked = printBlockReason(driver.deviceSpec(), media.target);
+    if (blocked) throw new Error(blocked);
     const status = await driver.getStatus(media.target).catch(() => null);
     if (status?.paperOut) throw new Error(media.target === 'tape' ? 'Kein Band eingelegt oder Band leer.' : 'Keine Etiketten eingelegt oder Rolle leer.');
     const raster = await renderRaster(editor.getDesignJSON(), media, editor.tapeLengthMm);
@@ -459,13 +506,16 @@ const commands: Record<string, () => unknown> = {
   disconnect,
   preview,
   print,
-  calibrate: () => openCalibrationWizard({
-    driver,
-    media: MEDIA,
-    currentMedia: editor.media,
-    connect: async () => { await connect(); return driver.isConnected(); },
-    errorText: usbErrorText,
-  }),
+  calibrate: () => {
+    if (driver.isConnected() && !driver.deviceSpec()) { toast(UNSUPPORTED_MESSAGE, 'error'); return; }
+    return openCalibrationWizard({
+      driver,
+      media: () => available,
+      currentMedia: editor.media,
+      connect: async () => { await connect(); return driver.isConnected(); },
+      errorText: usbErrorText,
+    });
+  },
   diagnostics: () => openDiagnostics({ driver, media: editor.media, errorText: usbErrorText }),
 };
 

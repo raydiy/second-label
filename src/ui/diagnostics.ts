@@ -2,6 +2,7 @@
 // or open a prefilled GitHub issue. Report building is pure (src/printer/diagnostics.ts).
 import type { Media, PrintTarget } from '../printer/types';
 import { loadCalibration } from '../printer/calibration';
+import { deviceTargets } from '../printer/devices';
 import {
   buildReport,
   githubIssueUrl,
@@ -54,6 +55,7 @@ export function openDiagnostics(host: DiagnosticsHost): Promise<void> {
       userAgent: navigator.userAgent,
       simulated: !!driver.simulated,
       device: driver.describeDevice(),
+      spec: driver.deviceSpec(),
       deviceIds,
       lastStatus: driver.lastStatuses(),
       calibration: { deviceKey: key, stored: !!stored, savedAt: stored?.savedAt ?? null, values: driver.activeCalibration() },
@@ -72,6 +74,11 @@ export function openDiagnostics(host: DiagnosticsHost): Promise<void> {
       rows.push(
         row('Gerät', `${d.productName ?? 'unbekannt'}${d.manufacturerName ? ` (${d.manufacturerName})` : ''}`),
         row('USB-Kennung', `Hersteller ${d.vendorId}, Produkt ${d.productId}`),
+        row('Unterstützung', r.support?.status === 'verified'
+          ? `${r.support.model}: getestet`
+          : r.support?.status === 'experimental'
+            ? `${r.support.model}: experimentell, noch nicht getestet. Eine Rückmeldung hilft sehr.`
+            : 'Modell unbekannt, Drucken ist gesperrt. Bitte diesen Bericht senden.'),
         row('Schnittstellen', h('ul', { class: 'diag-list' }, ...d.interfaces.map((i) =>
           h('li', {}, `#${i.number}${i.name ? ` ${i.name}` : ''}${i.interfaceClass !== null ? `, Klasse ${i.interfaceClass}` : ''}: `,
             i.endpoints.map((e) => `${e.direction === 'in' ? 'IN' : 'OUT'} ${hex(e.number | (e.direction === 'in' ? 0x80 : 0), 2)} (${e.packetSize} B)`).join(', '))))),
@@ -103,8 +110,10 @@ export function openDiagnostics(host: DiagnosticsHost): Promise<void> {
     deviceIds = [];
     render();
     if (!driver.isConnected()) return;
-    // Read-only queries: one status request per engine, then the device ID of each interface.
-    for (const t of ['label', 'tape'] as PrintTarget[]) await driver.getStatus(t).catch(() => null);
+    // Read-only queries: one status request per engine of a known model (an unknown model gets
+    // no data on its endpoints), then the device ID of each interface via control transfers.
+    const spec = driver.deviceSpec();
+    for (const t of spec ? deviceTargets(spec) : []) await driver.getStatus(t).catch(() => null);
     try {
       deviceIds = await driver.readDeviceIds();
     } catch (e) {

@@ -11,6 +11,7 @@ import {
 } from '../diagnostics';
 import { DEFAULT_CALIBRATION } from '../calibration';
 import { findMedia } from '../media';
+import { DUO_128, findDevice } from '../devices';
 
 const input = (over: Partial<ReportInput> = {}): ReportInput => ({
   app: { version: '0.3.0', commit: 'abc1234', buildDate: '2026-11-11' },
@@ -90,5 +91,19 @@ describe('github issue link', () => {
     expect(link.complete).toBe(false);
     expect(link.url.length).toBeLessThanOrEqual(MAX_ISSUE_URL_LENGTH);
     expect(new URL(link.url).searchParams.get('body')).not.toContain('```json');
+  });
+});
+
+describe('support status in the report', () => {
+  test('known, experimental and unknown models', () => {
+    const duo = buildReport(input({ spec: DUO_128 }));
+    expect(duo.support).toEqual({ model: 'LabelWriter DUO', status: 'verified' });
+    expect(reportMarkdown(duo)).toContain('| Support status | verified (LabelWriter DUO) |');
+    const l450 = buildReport(input({ spec: findDevice(0x0922, 0x0020) }));
+    expect(l450.support).toEqual({ model: 'LabelWriter 450', status: 'experimental' });
+    const unknown = buildReport(input({ spec: null }));
+    expect(unknown.support).toEqual({ model: null, status: 'unknown' });
+    expect(reportMarkdown(unknown)).toContain('| Support status | unknown |');
+    expect(buildReport(input({ device: null })).support).toBeNull();
   });
 });
