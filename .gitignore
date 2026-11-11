@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.DS_Store
+.playwright-mcp/
+spike/node_modules/
+spike/*.bin
+docs-editor-screenshot.png

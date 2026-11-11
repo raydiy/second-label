@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect x=%221%22 y=%224%22 width=%2214%22 height=%228%22 rx=%221%22 fill=%22%23000%22/%3E%3C/svg%3E" />
+    <title>Second Label</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">Second <span>Label</span></div>
+      <nav class="toolbar" aria-label="Werkzeuge">
+        <div class="group" role="group" aria-label="Datei">
+          <button data-cmd="new" data-icon="file-plus" title="Neues Layout">Neu</button>
+          <button data-cmd="save" data-icon="save" title="In der Bibliothek speichern (Strg+S)">Speichern</button>
+          <button data-cmd="saveAs" data-icon="save-all" title="Als neues Layout speichern">Kopie</button>
+          <button data-cmd="import" data-icon="upload" title="Layout-Datei (.json) importieren">Import</button>
+          <button data-cmd="export" data-icon="download" title="Layout als .json exportieren">Export</button>
+        </div>
+        <div class="group" role="group" aria-label="Bearbeiten">
+          <button data-cmd="undo" data-icon="undo-2" class="icon-only" title="Rückgängig (Strg+Z)" aria-label="Rückgängig"></button>
+          <button data-cmd="redo" data-icon="redo-2" class="icon-only" title="Wiederholen (Strg+Umschalt+Z)" aria-label="Wiederholen"></button>
+        </div>
+        <div class="group" role="group" aria-label="Einfügen">
+          <button data-cmd="addText" data-icon="type" title="Text einfügen">Text</button>
+          <button data-cmd="addLine" data-icon="minus" class="icon-only" title="Linie einfügen" aria-label="Linie"></button>
+          <button data-cmd="addRect" data-icon="square" class="icon-only" title="Rechteck einfügen" aria-label="Rechteck"></button>
+          <button data-cmd="addEllipse" data-icon="circle" class="icon-only" title="Ellipse einfügen" aria-label="Ellipse"></button>
+          <button data-cmd="addImage" data-icon="image" title="Bild einfügen (PNG, JPG, SVG)">Bild</button>
+          <button data-cmd="addIcon" data-icon="shapes" title="Symbol einfügen">Symbol</button>
+          <button data-cmd="addBarcode" data-icon="barcode" title="Barcode oder QR-Code einfügen">Code</button>
+        </div>
+        <div class="group" role="group" aria-label="Zoom">
+          <button data-cmd="zoomOut" data-icon="zoom-out" class="icon-only" title="Verkleinern" aria-label="Verkleinern"></button>
+          <output id="zoomLabel" class="zoom-label">100 %</output>
+          <button data-cmd="zoomIn" data-icon="zoom-in" class="icon-only" title="Vergrößern" aria-label="Vergrößern"></button>
+          <button data-cmd="zoomFit" data-icon="scan" class="icon-only" title="Einpassen" aria-label="Einpassen"></button>
+        </div>
+      </nav>
+      <div class="printbar" role="group" aria-label="Drucker">
+        <span id="connStatus" class="status-pill" role="status">Nicht verbunden</span>
+        <button data-cmd="connect" id="connectBtn" data-icon="usb">Verbinden</button>
+        <label class="copies" title="Anzahl Kopien">
+          <span>Kopien</span>
+          <input id="copies" type="number" min="1" max="99" value="1" inputmode="numeric" />
+        </label>
+        <button data-cmd="preview" data-icon="eye" title="1-Bit-Druckvorschau">Vorschau</button>
+        <button data-cmd="print" data-icon="printer" class="primary" title="Drucken (Strg+P)">Drucken</button>
+      </div>
+    </header>
+
+    <div id="notices"></div>
+
+    <main class="workspace">
+      <aside class="panel left" aria-label="Medium und Bibliothek">
+        <section>
+          <h2>Medium</h2>
+          <div class="segmented" role="radiogroup" aria-label="Druckwerk">
+            <label><input type="radio" name="engine" value="label" checked /> <span>Etikett</span></label>
+            <label><input type="radio" name="engine" value="tape" /> <span>Band</span></label>
+          </div>
+          <label class="field">
+            <span>Etikett / Band</span>
+            <select id="mediaSelect"></select>
+          </label>
+          <div id="tapeOptions" hidden>
+            <fieldset class="field">
+              <legend>Bandlänge</legend>
+              <label class="inline"><input type="radio" name="tapeMode" value="auto" checked /> automatisch</label>
+              <label class="inline"><input type="radio" name="tapeMode" value="fixed" /> fest</label>
+              <label class="inline unit"><input id="tapeLength" type="number" min="15" max="1000" step="1" value="60" disabled /> mm</label>
+            </fieldset>
+          </div>
+          <p id="mediaInfo" class="muted small"></p>
+        </section>
+        <section>
+          <h2>Layout</h2>
+          <label class="field">
+            <span>Name</span>
+            <input id="layoutName" type="text" value="Unbenannt" maxlength="120" />
+          </label>
+          <p id="saveState" class="muted small" role="status"></p>
+        </section>
+        <section class="library">
+          <h2>Bibliothek</h2>
+          <ul id="libraryList" class="library-list" aria-label="Gespeicherte Layouts"></ul>
+        </section>
+      </aside>
+
+      <section class="stage" aria-label="Arbeitsfläche">
+        <div id="stageScroll" class="stage-scroll">
+          <div id="labelFrame" class="label-frame">
+            <canvas id="editorCanvas" aria-label="Etiketten-Editor"></canvas>
+          </div>
+        </div>
+        <footer id="statusBar" class="statusbar" role="status"></footer>
+      </section>
+
+      <aside class="panel right" aria-label="Eigenschaften">
+        <div class="bw-hint" title="Thermodruck kennt keine Farben">
+          <span class="swatch black"></span><span class="swatch white"></span>
+          <span>Thermodruck: nur Schwarz und Weiß. Farben und Graustufen werden beim Druck in Schwarz/Weiß umgewandelt.</span>
+        </div>
+        <div id="props"></div>
+      </aside>
+    </main>
+
+    <input id="fileImport" type="file" accept=".json,application/json" hidden />
+    <input id="fileImage" type="file" accept="image/png,image/jpeg,image/svg+xml,.svg" hidden />
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

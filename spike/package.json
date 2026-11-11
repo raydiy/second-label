@@ -1,0 +1,13 @@
+{
+  "name": "dymo-duo-spike",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Read-only USB probe for the DYMO LabelWriter DUO: descriptors, IEEE 1284 IDs, ESC A status. Never sends print or feed data.",
+  "type": "module",
+  "scripts": {
+    "probe": "node probe.mjs"
+  },
+  "dependencies": {
+    "usb": "^3.3.0"
+  }
+}
