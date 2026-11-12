@@ -15,6 +15,7 @@
 
 import type { Calibration, PrintTarget } from './types';
 import { DEFAULT_CALIBRATION } from './raster';
+import { PrinterError } from './errors';
 
 export const DYMO_VENDOR_ID = 0x0922;
 
@@ -169,15 +170,24 @@ export function deviceTargets(spec: DeviceSpec): PrintTarget[] {
 }
 
 /**
- * Why a print on `target` must not be sent to this device (German, shown in the UI), or null
- * when printing is allowed. `spec` null means a connected but unknown model.
+ * Why a print on `target` must not be sent to this device, or null when printing is allowed.
+ * `spec` null means a connected but unknown model. The error carries a code for the UI text.
  */
-export function printBlockReason(spec: DeviceSpec | null, target: PrintTarget): string | null {
-  if (!spec) return UNSUPPORTED_MESSAGE;
-  if (target === 'tape' && !spec.engines.tape) return `Der ${spec.name} hat kein Banddruckwerk. Bitte ein Etikett als Medium wählen.`;
-  if (target === 'label' && !spec.engines.label) return `Der ${spec.name} hat kein Etikettendruckwerk.`;
+export function printBlocker(spec: DeviceSpec | null, target: PrintTarget): PrinterError | null {
+  if (!spec) return new PrinterError('unsupportedModel', UNSUPPORTED_MESSAGE);
+  if (target === 'tape' && !spec.engines.tape) {
+    return new PrinterError('noTapeEngine', `The ${spec.name} has no tape engine. Choose a label as medium.`, { model: spec.name });
+  }
+  if (target === 'label' && !spec.engines.label) {
+    return new PrinterError('noLabelEngine', `The ${spec.name} has no label engine.`, { model: spec.name });
+  }
   return null;
 }
 
+/** English message of printBlocker(), or null when printing is allowed. */
+export function printBlockReason(spec: DeviceSpec | null, target: PrintTarget): string | null {
+  return printBlocker(spec, target)?.message ?? null;
+}
+
 export const UNSUPPORTED_MESSAGE =
-  'Dieses Modell wird noch nicht unterstützt. Über „Druckerprofil / Diagnose“ kannst du es melden.';
+  'This model is not supported yet. Use "Printer profile / diagnostics" to report it.';

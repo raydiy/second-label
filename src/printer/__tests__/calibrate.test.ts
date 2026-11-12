@@ -86,18 +86,18 @@ describe('solveLabelFeed', () => {
     expect(r.ok && r.value).toEqual({ feedStartDots: 62.4, feedScale: 1.0095 });
   });
 
-  test('implausible input yields German errors', () => {
+  test('implausible input yields issue codes', () => {
     const base = { frameDesignMm: t99012.frameXMm, frameMeasuredMm: 6, tickDesignMm: tick(80), tickMeasuredMm: 80 };
     const err = (m: Partial<typeof base>) => {
       const r = solveLabelFeed(lw99012, DEFAULT_CALIBRATION.label, { ...base, ...m });
-      return r.ok ? '' : r.error;
+      return r.ok ? '' : r.error.code;
     };
-    expect(err({ frameMeasuredMm: 45 })).toContain('unplausibel');
-    expect(err({ tickMeasuredMm: 5 })).toContain('weiter von der linken Etikettenkante');
-    expect(err({ tickMeasuredMm: 95 })).toContain('Etikettenlänge');
-    expect(err({ tickMeasuredMm: 70 })).toContain('Vorschubfehler'); // measured tick 70 as 80
-    expect(err({ tickDesignMm: 10 })).toContain('mindestens 20 mm');
-    expect(err({ frameMeasuredMm: Number.NaN })).toContain('als Zahl');
+    expect(err({ frameMeasuredMm: 45 })).toBe('frameImplausible');
+    expect(err({ tickMeasuredMm: 5 })).toBe('tickBeforeFrame');
+    expect(err({ tickMeasuredMm: 95 })).toBe('tickBeyondLength');
+    expect(err({ tickMeasuredMm: 70 })).toBe('feedScaleImplausible'); // measured tick 70 as 80
+    expect(err({ tickDesignMm: 10 })).toBe('tickTooClose');
+    expect(err({ frameMeasuredMm: Number.NaN })).toBe('feedNotNumbers');
   });
 });
 
@@ -131,7 +131,7 @@ describe('solveLabelAcross', () => {
     const r = solveLabelAcross(lw99012, zero, 30);
     expect(r.ok).toBe(false);
     const r2 = solveLabelAcross(lw99012, zero, 9);
-    expect(!r2.ok && r2.error).toContain('daneben');
+    expect(!r2.ok && r2.error.code).toBe('frameOff');
   });
 });
 
@@ -168,7 +168,7 @@ describe('solveTapeCenter', () => {
   test('implausible input', () => {
     expect(solveTapeCenter(t24, 0, -1, 2).ok).toBe(false);
     const r = solveTapeCenter(t24, 0, 9, 9);
-    expect(!r.ok && r.error).toContain('zusammen');
+    expect(!r.ok && r.error.code).toBe('gapSumOff');
   });
 });
 
@@ -191,7 +191,7 @@ describe('solveCalibration', () => {
   });
 
   test('unknown tick and empty input are reported', () => {
-    expect(solveCalibration(lw99012, DEFAULT_CALIBRATION, { labelFeed: { frameMeasuredMm: 6, tickMm: 85, tickMeasuredMm: 85 } }).errors[0]).toContain('keinen beschrifteten Strich');
+    expect(solveCalibration(lw99012, DEFAULT_CALIBRATION, { labelFeed: { frameMeasuredMm: 6, tickMm: 85, tickMeasuredMm: 85 } }).errors[0]).toEqual({ code: 'noTick', params: { tick: 85 } });
     expect(solveCalibration(lw99012, DEFAULT_CALIBRATION, {}).errors.length).toBe(1);
   });
 

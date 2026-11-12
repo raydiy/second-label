@@ -1,5 +1,7 @@
 // Versioned layout file format, shared between users as .json.
 import type { TapeMode } from '../editor/editor';
+import { t } from '../i18n';
+import { LocalizedError } from '../i18n/errors';
 
 export const LAYOUT_FORMAT = 'second-label-layout';
 /** Format id used before the rename; still accepted on import. */
@@ -27,22 +29,22 @@ export interface StoredLayout extends LayoutFile {
 
 /** Validates and migrates arbitrary input to the current version. Throws German messages. */
 export function parseLayout(input: unknown): LayoutFile {
-  if (!input || typeof input !== 'object') throw new Error('Die Datei ist kein gültiges Layout.');
+  if (!input || typeof input !== 'object') throw new LocalizedError('error.notALayout');
   const o = input as Record<string, any>;
-  if (o.format !== LAYOUT_FORMAT && !LEGACY_FORMATS.includes(o.format)) throw new Error('Unbekanntes Dateiformat (kein Second-Label-Layout).');
-  if (typeof o.version !== 'number') throw new Error('Layout ohne Versionsangabe.');
+  if (o.format !== LAYOUT_FORMAT && !LEGACY_FORMATS.includes(o.format)) throw new LocalizedError('error.unknownFormat');
+  if (typeof o.version !== 'number') throw new LocalizedError('error.noVersion');
   if (o.version > LAYOUT_VERSION) {
-    throw new Error(`Das Layout stammt aus einer neueren Programmversion (v${o.version}). Bitte die Anwendung aktualisieren.`);
+    throw new LocalizedError('error.newerLayout', { version: String(o.version) });
   }
   // Future migrations: if (o.version === 1) { ...; o.version = 2 }
   if (typeof o.mediaId !== 'string' || !o.design || typeof o.design !== 'object' || !Array.isArray(o.design.objects)) {
-    throw new Error('Das Layout ist unvollständig (Medium oder Inhalt fehlt).');
+    throw new LocalizedError('error.incompleteLayout');
   }
   const now = new Date().toISOString();
   return {
     format: LAYOUT_FORMAT,
     version: LAYOUT_VERSION,
-    name: typeof o.name === 'string' && o.name.trim() ? o.name.trim() : 'Importiertes Layout',
+    name: typeof o.name === 'string' && o.name.trim() ? o.name.trim() : t('layout.importedName'),
     mediaId: o.mediaId,
     mediaInfo: o.mediaInfo,
     tape: o.tape && (o.tape.mode === 'auto' || o.tape.mode === 'fixed') ? { mode: o.tape.mode, lengthMm: Number(o.tape.lengthMm) || 60 } : undefined,
@@ -71,7 +73,7 @@ export function downloadLayout(l: LayoutFile) {
 
 export async function readLayoutFile(file: File): Promise<LayoutFile> {
   const r = await readImportFile(file);
-  if (r.kind !== 'layout') throw new Error('Die Datei ist eine Bibliotheks-Sicherung, kein einzelnes Layout.');
+  if (r.kind !== 'layout') throw new LocalizedError('error.isBackup');
   return r.layout;
 }
 
@@ -94,14 +96,14 @@ export async function readImportFile(file: File): Promise<ImportResult> {
   try {
     data = JSON.parse(await file.text());
   } catch {
-    throw new Error('Die Datei ist kein gültiges JSON.');
+    throw new LocalizedError('error.invalidJson');
   }
   const o = data as Record<string, any> | null;
   if (o && o.format === LIBRARY_FORMAT) {
     if (typeof o.version !== 'number' || o.version > LAYOUT_VERSION) {
-      throw new Error('Die Sicherung stammt aus einer neueren Programmversion. Bitte die Anwendung aktualisieren.');
+      throw new LocalizedError('error.newerBackup');
     }
-    if (!Array.isArray(o.layouts)) throw new Error('Die Sicherung enthält keine Layouts.');
+    if (!Array.isArray(o.layouts)) throw new LocalizedError('error.backupNoLayouts');
     const layouts = o.layouts.map((raw: Record<string, any>) => ({
       ...parseLayout({ ...raw, format: LAYOUT_FORMAT, version: raw.version ?? o.version }),
       id: typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID(),

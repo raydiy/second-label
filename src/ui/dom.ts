@@ -1,5 +1,6 @@
 // Small DOM helpers.
 import { icon } from './ui-icons';
+import { formatDateTime, formatNumber } from '../i18n';
 
 type Attrs = Record<string, string | number | boolean | undefined | ((e: Event) => void)>;
 
@@ -55,13 +56,9 @@ export function modal(title: string, body: Node, actions: { id: string; label: s
   return { dialog: dlg, result };
 }
 
-export function fmtDate(iso: string) {
-  try {
-    return new Date(iso).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
-  } catch {
-    return iso;
-  }
-}
+export const fmtDate = (iso: string) => formatDateTime(iso);
 
-export const num = (v: number, d = 1) => (Math.round(v * 10 ** d) / 10 ** d).toString().replace('.', ',');
+/** Number for display in the active UI language (decimal comma in German). */
+export const num = (v: number, d = 1) => formatNumber(v, d);
+/** Parses user input with either decimal separator. */
 export const parseNum = (s: string) => Number(String(s).replace(',', '.'));

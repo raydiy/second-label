@@ -7,12 +7,15 @@ import { mmToPt, ptToMm } from '../editor/geometry';
 import type { DlMeta } from '../editor/objects';
 import { askBarcode } from './dialogs';
 import { h, parseNum, toast } from './dom';
+import { hasKey, t } from '../i18n';
+import { errorText } from '../i18n/errors';
 
 type Meta = FabricObject & { dl?: DlMeta };
 
-const KIND_LABEL: Record<string, string> = {
-  text: 'Text', icon: 'Symbol', svg: 'Vektorgrafik', image: 'Bild', barcode: 'Code', rect: 'Rechteck', line: 'Linie', ellipse: 'Ellipse',
-};
+function kindLabel(kind: string): string {
+  const key = `kind.${kind}`;
+  return hasKey(key) ? t(key) : kind;
+}
 
 let systemFonts: string[] = [];
 
@@ -38,8 +41,8 @@ function selectField(label: string, value: string, options: [string, string][], 
 
 const bwValue = (c: unknown) => (typeof c !== 'string' || c === '' || c === 'transparent' || c === 'none' ? 'none' : c.toLowerCase() === WHITE ? 'white' : 'black');
 const bwColor = (v: string) => (v === 'none' ? 'transparent' : v === 'white' ? WHITE : BLACK);
-const BW_OPTS: [string, string][] = [['black', 'Schwarz'], ['white', 'Weiß']];
-const BW_NONE_OPTS: [string, string][] = [['none', 'Keine'], ['black', 'Schwarz'], ['white', 'Weiß']];
+const BW_OPTS = (): [string, string][] => [['black', t('color.black')], ['white', t('color.white')]];
+const BW_NONE_OPTS = (): [string, string][] => [['none', t('color.none')], ...BW_OPTS()];
 
 function iconButton(iconName: string, label: string, onClick: () => void, pressed?: boolean) {
   const attrs: Record<string, string | boolean | ((e: Event) => void)> = { icon: iconName, title: label, 'aria-label': label, class: 'icon-only', onclick: onClick };
@@ -75,123 +78,124 @@ function commonSection(ed: LabelEditor, o: FabricObject) {
   };
   return h('div', { class: 'prop-section' },
     h('div', { class: 'grid2' },
-      numField('X (mm)', ptToMm(b.left), (v) => moveTo('x', v), { id: 'p-x' }),
-      numField('Y (mm)', ptToMm(b.top), (v) => moveTo('y', v), { id: 'p-y' }),
-      numField('Breite (mm)', ptToMm(o.getScaledWidth()), setW, { id: 'p-w', min: 0.5 }),
-      numField('Höhe (mm)', ptToMm(o.getScaledHeight()), setH, { id: 'p-h', min: 0.5, disabled: isText }),
-      numField('Drehung (°)', o.angle, (v) => ed.update(o, { angle: ((v % 360) + 360) % 360 }), { id: 'p-angle', step: 15 }),
+      numField(t('props.x'), ptToMm(b.left), (v) => moveTo('x', v), { id: 'p-x' }),
+      numField(t('props.y'), ptToMm(b.top), (v) => moveTo('y', v), { id: 'p-y' }),
+      numField(t('props.width'), ptToMm(o.getScaledWidth()), setW, { id: 'p-w', min: 0.5 }),
+      numField(t('props.height'), ptToMm(o.getScaledHeight()), setH, { id: 'p-h', min: 0.5, disabled: isText }),
+      numField(t('props.rotation'), o.angle, (v) => ed.update(o, { angle: ((v % 360) + 360) % 360 }), { id: 'p-angle', step: 15 }),
     ),
   );
 }
 
 function arrangeSection(ed: LabelEditor) {
   return h('div', { class: 'prop-section' },
-    h('h2', {}, 'Ausrichten (druckbarer Bereich)'),
+    h('h2', {}, t('props.align')),
     h('div', { class: 'btnrow' },
-      iconButton('align-start-vertical', 'Links', () => ed.align('left')),
-      iconButton('align-center-vertical', 'Horizontal zentrieren', () => ed.align('hcenter')),
-      iconButton('align-end-vertical', 'Rechts', () => ed.align('right')),
-      iconButton('align-start-horizontal', 'Oben', () => ed.align('top')),
-      iconButton('align-center-horizontal', 'Vertikal zentrieren', () => ed.align('vcenter')),
-      iconButton('align-end-horizontal', 'Unten', () => ed.align('bottom')),
+      iconButton('align-start-vertical', t('props.alignLeft'), () => ed.align('left')),
+      iconButton('align-center-vertical', t('props.alignHCenter'), () => ed.align('hcenter')),
+      iconButton('align-end-vertical', t('props.alignRight'), () => ed.align('right')),
+      iconButton('align-start-horizontal', t('props.alignTop'), () => ed.align('top')),
+      iconButton('align-center-horizontal', t('props.alignVCenter'), () => ed.align('vcenter')),
+      iconButton('align-end-horizontal', t('props.alignBottom'), () => ed.align('bottom')),
     ),
-    h('h2', {}, 'Ebene'),
+    h('h2', {}, t('props.layer')),
     h('div', { class: 'btnrow' },
-      iconButton('bring-to-front', 'Ganz nach vorne', () => ed.zOrder('front')),
-      iconButton('arrow-up', 'Eine Ebene nach vorne', () => ed.zOrder('forward')),
-      iconButton('arrow-down', 'Eine Ebene nach hinten', () => ed.zOrder('backward')),
-      iconButton('send-to-back', 'Ganz nach hinten', () => ed.zOrder('back')),
+      iconButton('bring-to-front', t('props.toFront'), () => ed.zOrder('front')),
+      iconButton('arrow-up', t('props.forward'), () => ed.zOrder('forward')),
+      iconButton('arrow-down', t('props.backward'), () => ed.zOrder('backward')),
+      iconButton('send-to-back', t('props.toBack'), () => ed.zOrder('back')),
     ),
     h('div', { class: 'btnrow' },
-      h('button', { icon: 'copy', onclick: () => ed.duplicateSelection() }, 'Duplizieren'),
-      h('button', { icon: 'trash-2', class: 'danger', onclick: () => ed.deleteSelection() }, 'Löschen'),
+      h('button', { icon: 'copy', onclick: () => ed.duplicateSelection() }, t('props.duplicate')),
+      h('button', { icon: 'trash-2', class: 'danger', onclick: () => ed.deleteSelection() }, t('props.delete')),
     ),
   );
 }
 
 function fontOptions(current: string): HTMLSelectElement {
   const sel = h('select', { id: 'p-font' },
-    h('optgroup', { label: 'Mitgeliefert' } as never, ...BUNDLED_FONTS.map((f) => h('option', { value: f.family, style: `font-family:'${f.family}'` }, f.label))),
+    h('optgroup', { label: t('props.fontsBundled') } as never, ...BUNDLED_FONTS.map((f) =>
+      h('option', { value: f.family, style: `font-family:'${f.family}'` }, f.hint ? `${f.family} (${t(`font.${f.hint}`)})` : f.family))),
   );
   const extra = [...systemFonts];
   if (current && !BUNDLED_FONTS.some((f) => f.family === current) && !extra.includes(current)) extra.unshift(current);
   if (extra.length) {
-    sel.append(h('optgroup', { label: 'Systemschriften' } as never, ...extra.map((f) => h('option', { value: f }, f))));
+    sel.append(h('optgroup', { label: t('props.fontsSystem') } as never, ...extra.map((f) => h('option', { value: f }, f))));
   }
   sel.value = current;
   return sel;
 }
 
-function textSection(ed: LabelEditor, t: Textbox, rerender: () => void) {
-  const dl = (t as Meta).dl;
-  const text = h('textarea', { id: 'p-text', rows: 3, 'aria-label': 'Textinhalt' });
-  text.value = t.text;
-  text.addEventListener('change', () => ed.setTextProps(t, { text: text.value }));
+function textSection(ed: LabelEditor, tb: Textbox, rerender: () => void) {
+  const dl = (tb as Meta).dl;
+  const text = h('textarea', { id: 'p-text', rows: 3, 'aria-label': t('props.textAria') });
+  text.value = tb.text;
+  text.addEventListener('change', () => ed.setTextProps(tb, { text: text.value }));
   text.addEventListener('input', () => {
-    t.set({ text: text.value });
-    if (dl?.autoWidth !== false) ed.fitTextWidth(t);
+    tb.set({ text: text.value });
+    if (dl?.autoWidth !== false) ed.fitTextWidth(tb);
     ed.canvas.requestRenderAll();
   });
 
-  const font = fontOptions(t.fontFamily);
-  font.addEventListener('change', () => ed.setTextProps(t, { fontFamily: font.value }).then(rerender));
+  const font = fontOptions(tb.fontFamily);
+  font.addEventListener('change', () => ed.setTextProps(tb, { fontFamily: font.value }).then(rerender));
   const sysBtn = h('button', {
     type: 'button',
     disabled: !localFontsSupported(),
-    title: localFontsSupported() ? 'Installierte Schriften des Systems anzeigen (Berechtigung nötig)' : 'Nur in Chromium-Browsern verfügbar',
+    title: localFontsSupported() ? t('props.sysFontsTitle') : t('props.sysFontsUnavailable'),
     onclick: async () => {
       try {
         systemFonts = await queryLocalFamilies();
-        toast(`${systemFonts.length} Systemschriften geladen. Hinweis: Wer das Layout öffnet, braucht dieselbe Schrift.`, 'ok');
+        toast(t('props.sysFontsLoaded', { count: systemFonts.length }), 'ok');
         rerender();
       } catch (e) {
-        toast(`Systemschriften nicht verfügbar: ${(e as Error).message}`, 'error');
+        toast(t('props.sysFontsFailed', { error: errorText(e) }), 'error');
       }
     },
-  }, 'Systemschriften');
+  }, t('props.sysFonts'));
 
-  const bold = String(t.fontWeight) === 'bold' || Number(t.fontWeight) >= 600;
-  const italic = t.fontStyle === 'italic';
-  const set = (p: Parameters<LabelEditor['setTextProps']>[1]) => ed.setTextProps(t, p).then(rerender);
+  const bold = String(tb.fontWeight) === 'bold' || Number(tb.fontWeight) >= 600;
+  const italic = tb.fontStyle === 'italic';
+  const set = (p: Parameters<LabelEditor['setTextProps']>[1]) => ed.setTextProps(tb, p).then(rerender);
   const autoW = h('input', { type: 'checkbox', id: 'p-autow', checked: dl?.autoWidth !== false });
   autoW.addEventListener('change', () => {
-    (t as Meta).dl = { ...(dl ?? { kind: 'text' }), autoWidth: autoW.checked };
-    if (autoW.checked) ed.fitTextWidth(t);
+    (tb as Meta).dl = { ...(dl ?? { kind: 'text' }), autoWidth: autoW.checked };
+    if (autoW.checked) ed.fitTextWidth(tb);
     ed.commit();
     ed.canvas.requestRenderAll();
     rerender();
   });
 
   return h('div', { class: 'prop-section' },
-    h('h2', {}, 'Text'),
-    h('label', { class: 'field' }, h('span', {}, 'Inhalt (mehrzeilig möglich)'), text),
-    h('label', { class: 'field' }, h('span', {}, 'Schrift'), font),
+    h('h2', {}, t('props.text')),
+    h('label', { class: 'field' }, h('span', {}, t('props.content')), text),
+    h('label', { class: 'field' }, h('span', {}, t('props.font')), font),
     h('div', { class: 'btnrow' }, sysBtn),
     h('div', { class: 'grid2' },
-      numField('Größe (pt)', t.fontSize * t.scaleY, (v) => v > 0 && set({ fontSize: v / t.scaleY }), { id: 'p-size', step: 0.5, min: 2 }),
-      numField('Zeilenabstand', t.lineHeight, (v) => v > 0 && set({ lineHeight: v }), { id: 'p-lh', step: 0.05, min: 0.5 }),
+      numField(t('props.size'), tb.fontSize * tb.scaleY, (v) => v > 0 && set({ fontSize: v / tb.scaleY }), { id: 'p-size', step: 0.5, min: 2 }),
+      numField(t('props.lineHeight'), tb.lineHeight, (v) => v > 0 && set({ lineHeight: v }), { id: 'p-lh', step: 0.05, min: 0.5 }),
     ),
     h('div', { class: 'btnrow', style: 'margin-top:6px' },
-      iconButton('bold', 'Fett', () => set({ fontWeight: bold ? 'normal' : 'bold' }), bold),
-      iconButton('italic', 'Kursiv', () => set({ fontStyle: italic ? 'normal' : 'italic' }), italic),
-      iconButton('underline', 'Unterstrichen', () => set({ underline: !t.underline }), !!t.underline),
-      iconButton('align-left', 'Linksbündig', () => set({ textAlign: 'left' }), t.textAlign === 'left'),
-      iconButton('align-center', 'Zentriert', () => set({ textAlign: 'center' }), t.textAlign === 'center'),
-      iconButton('align-right', 'Rechtsbündig', () => set({ textAlign: 'right' }), t.textAlign === 'right'),
+      iconButton('bold', t('props.bold'), () => set({ fontWeight: bold ? 'normal' : 'bold' }), bold),
+      iconButton('italic', t('props.italic'), () => set({ fontStyle: italic ? 'normal' : 'italic' }), italic),
+      iconButton('underline', t('props.underline'), () => set({ underline: !tb.underline }), !!tb.underline),
+      iconButton('align-left', t('props.textLeft'), () => set({ textAlign: 'left' }), tb.textAlign === 'left'),
+      iconButton('align-center', t('props.textCenter'), () => set({ textAlign: 'center' }), tb.textAlign === 'center'),
+      iconButton('align-right', t('props.textRight'), () => set({ textAlign: 'right' }), tb.textAlign === 'right'),
     ),
-    h('label', { class: 'check' }, autoW, 'Breite automatisch an Text anpassen'),
-    selectField('Textfarbe', bwValue(t.fill) === 'white' ? 'white' : 'black', BW_OPTS, (v) => set({ fill: bwColor(v) }), 'p-fill'),
+    h('label', { class: 'check' }, autoW, t('props.autoWidth')),
+    selectField(t('props.textColor'), bwValue(tb.fill) === 'white' ? 'white' : 'black', BW_OPTS(), (v) => set({ fill: bwColor(v) }), 'p-fill'),
   );
 }
 
 function shapeSection(ed: LabelEditor, o: FabricObject) {
-  const parts: Node[] = [h('h2', {}, 'Form')];
+  const parts: Node[] = [h('h2', {}, t('props.shape'))];
   const isLine = o instanceof Line;
-  if (!isLine) parts.push(selectField('Füllung', bwValue(o.fill), BW_NONE_OPTS, (v) => ed.update(o, { fill: bwColor(v) }), 'p-sfill'));
-  parts.push(selectField('Kontur', bwValue(o.stroke), isLine ? BW_OPTS : BW_NONE_OPTS, (v) => ed.update(o, { stroke: v === 'none' ? null : bwColor(v) }), 'p-stroke'));
+  if (!isLine) parts.push(selectField(t('props.fill'), bwValue(o.fill), BW_NONE_OPTS(), (v) => ed.update(o, { fill: bwColor(v) }), 'p-sfill'));
+  parts.push(selectField(t('props.stroke'), bwValue(o.stroke), isLine ? BW_OPTS() : BW_NONE_OPTS(), (v) => ed.update(o, { stroke: v === 'none' ? null : bwColor(v) }), 'p-stroke'));
   parts.push(h('div', { class: 'grid2' },
-    numField('Linienstärke (pt)', o.strokeWidth, (v) => v >= 0 && ed.update(o, { strokeWidth: v }), { id: 'p-sw', step: 0.25, min: 0 }),
-    o instanceof Rect ? numField('Eckenradius (mm)', ptToMm(o.rx), (v) => ed.update(o, { rx: mmToPt(v), ry: mmToPt(v) }), { id: 'p-rx', min: 0 }) : '',
+    numField(t('props.strokeWidth'), o.strokeWidth, (v) => v >= 0 && ed.update(o, { strokeWidth: v }), { id: 'p-sw', step: 0.25, min: 0 }),
+    o instanceof Rect ? numField(t('props.cornerRadius'), ptToMm(o.rx), (v) => ed.update(o, { rx: mmToPt(v), ry: mmToPt(v) }), { id: 'p-rx', min: 0 }) : '',
   ));
   return h('div', { class: 'prop-section' }, ...parts);
 }
@@ -206,24 +210,24 @@ function vectorSection(ed: LabelEditor, o: FabricObject) {
   const f = first(o);
   const cur = bwValue(f.stroke) !== 'none' ? bwValue(f.stroke) : bwValue(f.fill);
   return h('div', { class: 'prop-section' },
-    h('h2', {}, 'Farbe'),
-    selectField('Farbe', cur === 'white' ? 'white' : 'black', BW_OPTS, (v) => { recolor(o, bwColor(v)); ed.update(o, {}); }, 'p-vcolor'),
+    h('h2', {}, t('props.colorHeading')),
+    selectField(t('props.color'), cur === 'white' ? 'white' : 'black', BW_OPTS(), (v) => { recolor(o, bwColor(v)); ed.update(o, {}); }, 'p-vcolor'),
   );
 }
 
 function barcodeSection(ed: LabelEditor, o: FabricObject) {
   const dl = (o as Meta).dl!;
   return h('div', { class: 'prop-section' },
-    h('h2', {}, 'Code'),
+    h('h2', {}, t('props.code')),
     h('p', { class: 'small', style: 'word-break: break-all' }, `${dl.bcid}: ${dl.data}`),
     h('button', {
       icon: 'pencil',
       onclick: async () => {
         const r = await askBarcode({ bcid: dl.bcid!, data: dl.data ?? '' });
         if (!r) return;
-        try { await ed.updateBarcode(o, r.bcid, r.data); } catch (e) { toast((e as Error).message, 'error'); }
+        try { await ed.updateBarcode(o, r.bcid, r.data); } catch (e) { toast(errorText(e), 'error'); }
       },
-    }, 'Inhalt bearbeiten'),
+    }, t('props.editContent')),
   );
 }
 
@@ -236,32 +240,32 @@ export function renderProperties(ed: LabelEditor, root: HTMLElement) {
 
   if (!act) {
     out.push(h('div', { class: 'prop-section' },
-      h('h2', {}, 'Eigenschaften'),
-      h('p', { class: 'muted small' }, 'Objekt auswählen, um es zu bearbeiten. Über die Werkzeugleiste Text, Formen, Bilder, Symbole und Codes einfügen.'),
+      h('h2', {}, t('props.heading')),
+      h('p', { class: 'muted small' }, t('props.hint')),
     ));
     out.push(h('div', { class: 'kbd-help' },
-      h('h2', {}, 'Tastatur'),
-      h('div', {}, h('kbd', {}, 'Entf'), ' Löschen'),
-      h('div', {}, h('kbd', {}, 'Strg+D'), ' Duplizieren'),
-      h('div', {}, h('kbd', {}, 'Strg+Z'), ' / ', h('kbd', {}, 'Strg+Umschalt+Z'), ' Rückgängig / Wiederholen'),
-      h('div', {}, h('kbd', {}, 'Pfeiltasten'), ' Verschieben (mit Umschalt: 10x)'),
-      h('div', {}, h('kbd', {}, 'Strg+Mausrad'), ' Zoom'),
-      h('div', {}, 'Mittellinien rasten beim Verschieben ein.'),
+      h('h2', {}, t('kbd.heading')),
+      h('div', {}, h('kbd', {}, t('kbd.del')), ` ${t('kbd.delete')}`),
+      h('div', {}, h('kbd', {}, t('kbd.ctrlD')), ` ${t('kbd.duplicate')}`),
+      h('div', {}, h('kbd', {}, t('kbd.ctrlZ')), ' / ', h('kbd', {}, t('kbd.ctrlShiftZ')), ` ${t('kbd.undoRedo')}`),
+      h('div', {}, h('kbd', {}, t('kbd.arrows')), ` ${t('kbd.move')}`),
+      h('div', {}, h('kbd', {}, t('kbd.ctrlWheel')), ` ${t('kbd.zoom')}`),
+      h('div', {}, t('kbd.snap')),
     ));
   } else if (act instanceof ActiveSelection) {
-    out.push(h('h2', {}, `${objs.length} Objekte ausgewählt`));
+    out.push(h('h2', {}, t('props.selected', { count: objs.length })));
     out.push(arrangeSection(ed));
   } else {
     const dl = (act as Meta).dl;
     const kind = dl?.kind ?? (act instanceof Textbox ? 'text' : act.type);
-    out.push(h('h2', {}, KIND_LABEL[kind] ?? kind));
+    out.push(h('h2', {}, kindLabel(kind)));
     out.push(commonSection(ed, act));
     if (act instanceof Textbox) out.push(textSection(ed, act, rerender));
     else if (kind === 'barcode') out.push(barcodeSection(ed, act));
     else if (act instanceof Rect || act instanceof Ellipse || act instanceof Line) out.push(shapeSection(ed, act));
     else if (kind === 'icon' || kind === 'svg') out.push(vectorSection(ed, act));
     else if (kind === 'image') {
-      out.push(h('p', { class: 'muted small prop-section' }, 'Bilder werden in Graustufen angezeigt und beim Druck mit 50 % Schwellwert in Schwarz/Weiß umgesetzt. Kontrastreiche Motive verwenden; die Vorschau zeigt das Ergebnis.'));
+      out.push(h('p', { class: 'muted small prop-section' }, t('props.imageHint')));
     }
     out.push(arrangeSection(ed));
   }

@@ -29,11 +29,40 @@ import type { Calibration, Media } from './types';
 import { CALIBRATION_LIMITS, cloneCalibration } from './calibration';
 import { testPatternGeometry } from './testpattern';
 
-export type SolveResult<T> = { ok: true; value: T } | { ok: false; error: string };
+/** Why a measurement was rejected. The UI turns code and params (numbers in mm or %) into text. */
+export type CalibrationIssueCode =
+  | 'feedOnlyLabels'
+  | 'feedNotNumbers'
+  | 'frameImplausible'
+  | 'tickBeforeFrame'
+  | 'tickBeyondLength'
+  | 'tickTooClose'
+  | 'feedScaleImplausible'
+  | 'feedStartImplausible'
+  | 'acrossOnlyLabels'
+  | 'acrossNotNumber'
+  | 'bottomImplausible'
+  | 'frameOff'
+  | 'offsetOutOfRange'
+  | 'tapeOnlyTape'
+  | 'tapeNotNumbers'
+  | 'gapNegative'
+  | 'gapTooLarge'
+  | 'gapSumOff'
+  | 'correctionOutOfRange'
+  | 'noMeasurement'
+  | 'noTick'
+  | 'tapeMissing';
+
+export interface CalibrationIssue {
+  code: CalibrationIssueCode;
+  params?: Record<string, number>;
+}
+
+export type SolveResult<T> = { ok: true; value: T } | { ok: false; error: CalibrationIssue };
 
 const MM_PER_INCH = 25.4;
-const de = (v: number, d = 1) => v.toFixed(d).replace('.', ',');
-const fail = <T>(error: string): SolveResult<T> => ({ ok: false, error });
+const fail = <T>(code: CalibrationIssueCode, params?: Record<string, number>): SolveResult<T> => ({ ok: false, error: { code, params } });
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 /** Design positions (mm) the user measures against, taken from the exact pattern geometry. */
@@ -68,15 +97,15 @@ export function solveLabelFeed(
   active: Calibration['label'],
   m: LabelFeedInput,
 ): SolveResult<{ feedStartDots: number; feedScale: number }> {
-  if (media.target !== 'label') return fail('Die Vorschub-Kalibrierung gilt nur für Etiketten.');
+  if (media.target !== 'label') return fail('feedOnlyLabels');
   const len = media.lengthMm ?? Infinity;
-  if (!isNum(m.frameMeasuredMm) || !isNum(m.tickMeasuredMm)) return fail('Bitte beide Längen-Messwerte als Zahl in mm eingeben.');
+  if (!isNum(m.frameMeasuredMm) || !isNum(m.tickMeasuredMm)) return fail('feedNotNumbers');
   if (m.frameMeasuredMm < 0 || m.frameMeasuredMm > 30) {
-    return fail(`Abstand zur linken Rahmenlinie: ${de(m.frameMeasuredMm)} mm ist unplausibel (erwartet etwa ${de(m.frameDesignMm)} mm).`);
+    return fail('frameImplausible', { measured: m.frameMeasuredMm, expected: m.frameDesignMm });
   }
-  if (m.tickMeasuredMm <= m.frameMeasuredMm) return fail('Der Strich muss weiter von der linken Etikettenkante entfernt sein als die Rahmenlinie.');
-  if (m.tickMeasuredMm > len) return fail(`Der Strich kann nicht weiter als die Etikettenlänge (${len} mm) entfernt sein.`);
-  if (m.tickDesignMm - m.frameDesignMm < 20) return fail('Bitte einen Strich wählen, der mindestens 20 mm rechts der Rahmenlinie liegt.');
+  if (m.tickMeasuredMm <= m.frameMeasuredMm) return fail('tickBeforeFrame');
+  if (m.tickMeasuredMm > len) return fail('tickBeyondLength', { length: len });
+  if (m.tickDesignMm - m.frameDesignMm < 20) return fail('tickTooClose');
 
   const dpi = media.dpi;
   const s = (active.feedStartDots / dpi) * MM_PER_INCH; // mm
@@ -84,12 +113,11 @@ export function solveLabelFeed(
   const q = ((m.tickMeasuredMm - m.frameMeasuredMm) * k) / (m.tickDesignMm - m.frameDesignMm);
   const p0 = m.frameMeasuredMm - ((m.frameDesignMm - s) / k) * q; // mm
   if (q < CALIBRATION_LIMITS.feedScale.min || q > CALIBRATION_LIMITS.feedScale.max) {
-    const pct = (q - 1) * 100;
-    return fail(`Die Messung ergibt einen Vorschubfehler von ${de(pct)} %. Das ist unplausibel, bitte nachmessen (richtiger Strich? Ab der linken Etikettenkante gemessen?).`);
+    return fail('feedScaleImplausible', { pct: (q - 1) * 100 });
   }
   const feedStartDots = Math.round(((p0 / MM_PER_INCH) * dpi) * 10) / 10;
   if (feedStartDots < CALIBRATION_LIMITS.feedStartDots.min || feedStartDots > CALIBRATION_LIMITS.feedStartDots.max) {
-    return fail(`Die Messung ergibt einen Druckbeginn bei ${de(p0)} mm. Das ist unplausibel, bitte nachmessen.`);
+    return fail('feedStartImplausible', { start: p0 });
   }
   return { ok: true, value: { feedStartDots, feedScale: Math.round(q * 1e5) / 1e5 } };
 }
@@ -99,18 +127,18 @@ export function solveLabelAcross(
   active: Calibration['label'],
   bottomMeasuredMm: number,
 ): SolveResult<{ headOffsetDots: number }> {
-  if (media.target !== 'label') return fail('Diese Messung gilt nur für Etiketten.');
-  if (!isNum(bottomMeasuredMm)) return fail('Bitte den Abstand zur unteren Rahmenlinie als Zahl in mm eingeben.');
+  if (media.target !== 'label') return fail('acrossOnlyLabels');
+  if (!isNum(bottomMeasuredMm)) return fail('acrossNotNumber');
   const expected = media.widthMm - (media.printable.yMm + media.printable.heightMm);
   if (bottomMeasuredMm < 0 || bottomMeasuredMm > media.widthMm / 2) {
-    return fail(`Abstand zur unteren Rahmenlinie: ${de(bottomMeasuredMm)} mm ist unplausibel (erwartet etwa ${de(expected)} mm).`);
+    return fail('bottomImplausible', { measured: bottomMeasuredMm, expected });
   }
   if (Math.abs(bottomMeasuredMm - expected) > 6) {
-    return fail(`Der Rahmen liegt ${de(bottomMeasuredMm - expected)} mm daneben. Das ist mehr als plausibel, bitte nachmessen (untere Kante, großes Quadrat oben links?).`);
+    return fail('frameOff', { diff: bottomMeasuredMm - expected });
   }
   const headOffsetDots = active.headOffsetDots - Math.round(((bottomMeasuredMm - expected) * media.dpi) / MM_PER_INCH);
   const lim = CALIBRATION_LIMITS.headOffsetDots;
-  if (headOffsetDots < lim.min || headOffsetDots > lim.max) return fail('Der berechnete Versatz liegt außerhalb des zulässigen Bereichs. Bitte nachmessen.');
+  if (headOffsetDots < lim.min || headOffsetDots > lim.max) return fail('offsetOutOfRange');
   return { ok: true, value: { headOffsetDots } };
 }
 
@@ -120,19 +148,19 @@ export function solveTapeCenter(
   gapTopMm: number,
   gapBottomMm: number,
 ): SolveResult<{ centerCorrectionDots: number }> {
-  if (media.target !== 'tape') return fail('Diese Messung gilt nur für Band.');
-  if (!isNum(gapTopMm) || !isNum(gapBottomMm)) return fail('Bitte beide Abstände als Zahl in mm eingeben.');
-  if (gapTopMm < 0 || gapBottomMm < 0) return fail('Abstände können nicht negativ sein.');
-  if (gapTopMm > media.widthMm || gapBottomMm > media.widthMm) return fail(`Ein Abstand ist größer als die Bandbreite (${media.widthMm} mm).`);
+  if (media.target !== 'tape') return fail('tapeOnlyTape');
+  if (!isNum(gapTopMm) || !isNum(gapBottomMm)) return fail('tapeNotNumbers');
+  if (gapTopMm < 0 || gapBottomMm < 0) return fail('gapNegative');
+  if (gapTopMm > media.widthMm || gapBottomMm > media.widthMm) return fail('gapTooLarge', { width: media.widthMm });
   const expectedSum = media.widthMm - media.printable.heightMm;
   const sum = gapTopMm + gapBottomMm;
   if (Math.abs(sum - expectedSum) > 2.5) {
-    return fail(`Die beiden Abstände ergeben zusammen ${de(sum)} mm, erwartet sind etwa ${de(expectedSum)} mm (Bandbreite minus Rahmenhöhe). Bitte nachmessen.`);
+    return fail('gapSumOff', { sum, expected: expectedSum });
   }
   const shift = Math.round((((gapTopMm - gapBottomMm) / 2) * media.dpi) / MM_PER_INCH);
   const centerCorrectionDots = activeCorrectionDots + shift;
   const lim = CALIBRATION_LIMITS.tapeCorrectionDots;
-  if (centerCorrectionDots < lim.min || centerCorrectionDots > lim.max) return fail('Die berechnete Korrektur liegt außerhalb des zulässigen Bereichs. Bitte nachmessen.');
+  if (centerCorrectionDots < lim.min || centerCorrectionDots > lim.max) return fail('correctionOutOfRange');
   return { ok: true, value: { centerCorrectionDots } };
 }
 
@@ -145,7 +173,8 @@ export interface CalibrationInput {
 
 export interface CalibrationChange {
   key: 'headOffsetDots' | 'feedStartDots' | 'feedScale' | 'centerCorrectionDots';
-  label: string;
+  /** Tape width in mm for centerCorrectionDots. */
+  widthMm?: number;
   before: number;
   after: number;
 }
@@ -153,21 +182,21 @@ export interface CalibrationChange {
 export interface CalibrationSolution {
   calibration: Calibration;
   changes: CalibrationChange[];
-  errors: string[];
+  errors: CalibrationIssue[];
 }
 
 /**
  * Apply all given measurements to `printedWith` (the calibration active at print time).
- * Groups with errors leave their values unchanged and report a German message.
+ * Groups with errors leave their values unchanged and report an issue code.
  */
 export function solveCalibration(media: Media, printedWith: Calibration, input: CalibrationInput): CalibrationSolution {
   const cal = cloneCalibration(printedWith);
   const changes: CalibrationChange[] = [];
-  const errors: string[] = [];
+  const errors: CalibrationIssue[] = [];
   const t = measurementTargets(media);
 
   if (media.target === 'label') {
-    if (!input.labelFeed && !input.labelAcross) errors.push('Bitte mindestens eine Messung eingeben.');
+    if (!input.labelFeed && !input.labelAcross) errors.push({ code: 'noMeasurement' });
     if (input.labelFeed) {
       const tick = t.ticks.find((x) => x.mm === input.labelFeed!.tickMm);
       const r = tick
@@ -177,27 +206,27 @@ export function solveCalibration(media: Media, printedWith: Calibration, input: 
             tickDesignMm: tick.xMm,
             tickMeasuredMm: input.labelFeed.tickMeasuredMm,
           })
-        : fail<{ feedStartDots: number; feedScale: number }>(`Auf diesem Etikett gibt es keinen beschrifteten Strich „${input.labelFeed.tickMm}“.`);
+        : fail<{ feedStartDots: number; feedScale: number }>('noTick', { tick: input.labelFeed.tickMm });
       if (r.ok) {
-        changes.push({ key: 'feedStartDots', label: 'Druckbeginn (Punkte)', before: printedWith.label.feedStartDots, after: r.value.feedStartDots });
-        changes.push({ key: 'feedScale', label: 'Vorschub-Faktor', before: printedWith.label.feedScale, after: r.value.feedScale });
+        changes.push({ key: 'feedStartDots', before: printedWith.label.feedStartDots, after: r.value.feedStartDots });
+        changes.push({ key: 'feedScale', before: printedWith.label.feedScale, after: r.value.feedScale });
         Object.assign(cal.label, r.value);
       } else errors.push(r.error);
     }
     if (input.labelAcross) {
       const r = solveLabelAcross(media, printedWith.label, input.labelAcross.bottomMeasuredMm);
       if (r.ok) {
-        changes.push({ key: 'headOffsetDots', label: 'Versatz quer (Punkte)', before: printedWith.label.headOffsetDots, after: r.value.headOffsetDots });
+        changes.push({ key: 'headOffsetDots', before: printedWith.label.headOffsetDots, after: r.value.headOffsetDots });
         cal.label.headOffsetDots = r.value.headOffsetDots;
       } else errors.push(r.error);
     }
   } else {
-    if (!input.tape) errors.push('Bitte beide Abstände eingeben.');
+    if (!input.tape) errors.push({ code: 'tapeMissing' });
     else {
       const before = printedWith.tape.centerCorrectionDots[media.widthMm] ?? 0;
       const r = solveTapeCenter(media, before, input.tape.gapTopMm, input.tape.gapBottomMm);
       if (r.ok) {
-        changes.push({ key: 'centerCorrectionDots', label: `Korrektur ${media.widthMm}-mm-Band (Punkte)`, before, after: r.value.centerCorrectionDots });
+        changes.push({ key: 'centerCorrectionDots', widthMm: media.widthMm, before, after: r.value.centerCorrectionDots });
         cal.tape.centerCorrectionDots[media.widthMm] = r.value.centerCorrectionDots;
       } else errors.push(r.error);
     }

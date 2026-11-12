@@ -3,6 +3,9 @@ import type { Media } from '../printer/types';
 import { deleteLayout, listLayouts } from '../storage/db';
 import type { StoredLayout } from '../storage/layout-file';
 import { fmtDate, h, toast } from './dom';
+import { t } from '../i18n';
+import { errorText } from '../i18n/errors';
+import { mediaName } from './media-text';
 
 export interface LibraryActions {
   open(l: StoredLayout): void;
@@ -18,36 +21,36 @@ export async function renderLibrary(root: HTMLElement, act: LibraryActions) {
   try {
     items = await listLayouts();
   } catch (e) {
-    root.replaceChildren(h('li', { class: 'empty' }, (e as Error).message));
+    root.replaceChildren(h('li', { class: 'empty' }, errorText(e)));
     return;
   }
   if (!items.length) {
-    root.replaceChildren(h('li', { class: 'empty' }, 'Noch keine Layouts gespeichert.'));
+    root.replaceChildren(h('li', { class: 'empty' }, t('library.empty')));
     return;
   }
   const cur = act.currentId();
   root.replaceChildren(...items.map((l) => {
     const media = act.mediaById(l.mediaId);
-    const thumb = h('button', { class: 'thumb', title: `„${l.name}“ öffnen`, 'aria-label': `${l.name} öffnen`, onclick: () => act.open(l) },
+    const thumb = h('button', { class: 'thumb', title: t('library.openTitle', { name: l.name }), 'aria-label': t('library.openAria', { name: l.name }), onclick: () => act.open(l) },
       l.thumbnail ? h('img', { src: l.thumbnail, alt: '' }) : '');
     return h('li', { class: l.id === cur ? 'current' : '', 'data-layout-id': l.id },
       thumb,
       h('div', { class: 'name', title: l.name }, l.name),
-      h('div', { class: 'meta' }, `${media?.name ?? l.mediaInfo?.name ?? l.mediaId} · ${fmtDate(l.updatedAt)}`),
+      h('div', { class: 'meta' }, `${media ? mediaName(media) : l.mediaInfo?.name ?? l.mediaId} · ${fmtDate(l.updatedAt)}`),
       h('div', { class: 'actions' },
-        h('button', { onclick: () => act.open(l) }, 'Öffnen'),
-        h('button', { onclick: () => act.rename(l) }, 'Umbenennen'),
-        h('button', { onclick: () => act.duplicate(l) }, 'Duplizieren'),
-        h('button', { onclick: () => act.exportFile(l) }, 'Export'),
+        h('button', { onclick: () => act.open(l) }, t('library.open')),
+        h('button', { onclick: () => act.rename(l) }, t('library.rename')),
+        h('button', { onclick: () => act.duplicate(l) }, t('library.duplicate')),
+        h('button', { onclick: () => act.exportFile(l) }, t('library.export')),
         h('button', {
           class: 'danger',
           onclick: async () => {
-            if (!confirm(`Layout „${l.name}“ aus der Bibliothek entfernen?`)) return;
+            if (!confirm(t('library.confirmRemove', { name: l.name }))) return;
             await deleteLayout(l.id);
-            toast('Layout entfernt.');
+            toast(t('library.removed'));
             renderLibrary(root, act);
           },
-        }, 'Entfernen'),
+        }, t('library.remove')),
       ),
     );
   }));

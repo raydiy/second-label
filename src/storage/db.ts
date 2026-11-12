@@ -1,5 +1,6 @@
 // Minimal IndexedDB store for the layout library.
 import type { StoredLayout } from './layout-file';
+import { LocalizedError } from '../i18n/errors';
 
 // Internal name from before the rename, kept so existing saved layouts stay available.
 const DB_NAME = 'dymo-duo-labels';
@@ -17,7 +18,7 @@ function open(): Promise<IDBDatabase> {
       }
     };
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(new Error('Die lokale Layout-Bibliothek (IndexedDB) ist nicht verfügbar.'));
+    req.onerror = () => reject(new LocalizedError('error.dbUnavailable'));
   });
   return dbp;
 }
@@ -28,8 +29,8 @@ async function tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBReq
     const t = db.transaction(STORE, mode);
     const req = fn(t.objectStore(STORE));
     t.oncomplete = () => resolve(req.result);
-    t.onerror = () => reject(t.error ?? new Error('Speicherfehler'));
-    t.onabort = () => reject(t.error ?? new Error('Speichern abgebrochen (Speicher voll?)'));
+    t.onerror = () => reject(t.error ?? new LocalizedError('error.storage'));
+    t.onabort = () => reject(t.error ?? new LocalizedError('error.storageAborted'));
   });
 }
 

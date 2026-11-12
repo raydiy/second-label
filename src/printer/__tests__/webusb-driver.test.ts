@@ -75,7 +75,7 @@ function blankImage(w: number, h: number) {
 describe('WebUsbPrinterDriver', () => {
   test('connect / status per engine uses interface 0 for label and 1 for tape', async () => {
     const { dev, driver } = setup();
-    expect(await driver.getStatus('label')).toEqual({ connected: false, message: 'Not connected' });
+    expect(await driver.getStatus('label')).toEqual({ connected: false, message: 'Not connected', code: 'notConnected' });
     await driver.connect();
     expect(driver.isConnected()).toBe(true);
     const label = await driver.getStatus('label');
@@ -117,7 +117,11 @@ describe('WebUsbPrinterDriver', () => {
     dev.statusByte[1] = 0xa1;
     const media = findMedia('lw-99010')!;
     await expect(driver.print({ image: blankImage(10, 10), media })).rejects.toThrow('Out of labels');
-    expect(dev.writes.length).toBe(1); // only the status request
+    await expect(driver.print({ image: blankImage(10, 10), media })).rejects.toMatchObject({
+      code: 'notReady',
+      params: { target: 'label', status: 'outOfLabels' },
+    });
+    expect(dev.writes.length).toBe(2); // only the status requests
   });
 });
 
@@ -212,10 +216,10 @@ describe('WebUsbPrinterDriver: device table', () => {
     expect((await driver.getStatus('label')).ready).toBe(true);
     const tape = await driver.getStatus('tape');
     expect(tape).toMatchObject({ connected: true, ready: false });
-    expect(tape.message).toContain('kein Banddruckwerk');
+    expect(tape.message).toContain('no tape engine');
     expect(dev.writes.length).toBe(1); // only the label status request
     const t = findMedia('d1-12mm')!;
-    await expect(driver.print({ image: blankImage(100, mmToDots(12, 180)), media: t })).rejects.toThrow('kein Banddruckwerk');
+    await expect(driver.print({ image: blankImage(100, mmToDots(12, 180)), media: t })).rejects.toThrow('no tape engine');
     const m = findMedia('lw-99010')!;
     await driver.print({ image: blankImage(10, 10), media: m });
     expect(dev.writes.every((w) => w.ep === 1)).toBe(true);

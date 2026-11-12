@@ -1,6 +1,7 @@
 // Factories for vector content: SVG (icons, uploads) and barcodes.
 import { loadSVGFromString, util, type FabricObject } from 'fabric';
 import { forceBW } from './bw';
+import { LocalizedError } from '../i18n/errors';
 
 /** Custom metadata stored on objects (serialised via FabricObject.customProperties). */
 export interface DlMeta {
@@ -15,16 +16,17 @@ export async function svgToObject(svg: string): Promise<FabricObject> {
   const clean = svg.replace(/currentColor/g, '#000000');
   const { objects, options } = await loadSVGFromString(clean);
   const items = objects.filter((o): o is NonNullable<typeof o> => !!o) as FabricObject[];
-  if (!items.length) throw new Error('Die SVG-Datei enthält keine darstellbaren Elemente.');
+  if (!items.length) throw new LocalizedError('error.svgEmpty');
   const obj = items.length === 1 ? items[0] : util.groupSVGElements(items, options);
   forceBW(obj);
   return obj;
 }
 
+/** `label` is the English name; the UI shows barcode.types.<bcid> from the locale files. */
 export interface BarcodeType { bcid: string; label: string; sample: string; linear: boolean }
 
 export const BARCODE_TYPES: BarcodeType[] = [
-  { bcid: 'qrcode', label: 'QR-Code', sample: 'https://example.org', linear: false },
+  { bcid: 'qrcode', label: 'QR code', sample: 'https://example.org', linear: false },
   { bcid: 'datamatrix', label: 'Data Matrix', sample: 'ABC-123', linear: false },
   { bcid: 'code128', label: 'Code 128', sample: 'ABC-12345', linear: true },
   { bcid: 'code39', label: 'Code 39', sample: 'ABC123', linear: true },
@@ -43,7 +45,7 @@ export async function barcodeToObject(bcid: string, text: string): Promise<Fabri
     svg = bwip.toSVG(opts);
   } catch (e) {
     const msg = String((e as Error)?.message ?? e).replace(/^Error:\s*/, '');
-    throw new Error(`Barcode kann nicht erzeugt werden: ${msg}`);
+    throw new LocalizedError('error.barcode', { detail: msg });
   }
   return svgToObject(svg);
 }

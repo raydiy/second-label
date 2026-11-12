@@ -2,12 +2,22 @@
 // The math lives in src/printer/calibrate.ts, storage in src/printer/calibration.ts.
 import type { Calibration, Media, PrintTarget, PrinterDriver } from '../printer/types';
 import { loadCalibration, resetCalibration, saveCalibration } from '../printer/calibration';
-import { UNSUPPORTED_MESSAGE, printBlockReason } from '../printer/devices';
-import { measurementTargets, solveCalibration, type CalibrationInput, type CalibrationSolution } from '../printer/calibrate';
+import { printBlocker } from '../printer/devices';
+import {
+  measurementTargets,
+  solveCalibration,
+  type CalibrationChange,
+  type CalibrationInput,
+  type CalibrationIssue,
+  type CalibrationSolution,
+} from '../printer/calibrate';
 import type { DiagnosticDriver } from '../printer/diagnostics';
 import { patternLengthMm, renderTestPattern } from '../printer/testpattern';
 import { threshold } from '../app/preview';
 import { h, num, parseNum, toast } from './dom';
+import { formatDateTime, t } from '../i18n';
+import { LocalizedError } from '../i18n/errors';
+import { mediaName } from './media-text';
 
 export type CalibrationDriver = PrinterDriver & DiagnosticDriver & { simulated?: boolean };
 
@@ -21,7 +31,7 @@ export interface CalibrationHost {
   errorText(e: unknown): string;
 }
 
-const STEPS = ['Medium wählen', 'Testmuster drucken', 'Messen', 'Ergebnis'];
+const STEPS = () => [t('calib.stepChoose'), t('calib.stepPrint'), t('calib.stepMeasure'), t('calib.stepResult')];
 
 /** Media the wizard can calibrate with: die-cut labels (need a label edge) and all tapes. */
 const calibratable = (m: Media) => m.target === 'tape' || m.lengthMm !== null;
@@ -32,6 +42,19 @@ function patternImageData(media: Media): ImageData {
 }
 
 const fmt = (v: number, d = 1) => num(v, d);
+
+/** Solver issue as text; all parameters are mm or % values shown with one decimal. */
+function issueText(issue: CalibrationIssue): string {
+  const params = Object.fromEntries(Object.entries(issue.params ?? {}).map(([k, v]) => [k, fmt(v)]));
+  return t(`calib.issue.${issue.code}`, params);
+}
+
+function changeLabel(c: CalibrationChange): string {
+  return t(`calib.change.${c.key}`, { width: c.widthMm ?? '' });
+}
+
+/** Escape text for the inline SVG diagrams. */
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
   const { driver } = host;
@@ -51,9 +74,9 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
   };
   const media = () => host.media().find((m) => m.id === st.mediaId) ?? host.media().find(calibratable)!;
 
-  const dlg = h('dialog', { class: 'calib-dialog', 'aria-label': 'Drucker kalibrieren' });
-  const title = h('h2', {}, 'Drucker kalibrieren');
-  const steps = h('ol', { class: 'calib-steps', 'aria-label': 'Schritte' });
+  const dlg = h('dialog', { class: 'calib-dialog', 'aria-label': t('calib.title') });
+  const title = h('h2', {}, t('calib.title'));
+  const steps = h('ol', { class: 'calib-steps', 'aria-label': t('calib.stepsAria') });
   const body = h('div', { class: 'calib-body' });
   const bar = h('div', { class: 'dialog-actions' });
   dlg.append(title, steps, body, bar);
@@ -75,18 +98,19 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
   const deviceLine = () => {
     const key = driver.deviceKey();
     const dev = driver.describeDevice();
-    if (!key) return h('p', { class: 'calib-device warn' }, 'Kein Drucker verbunden. Zum Drucken des Testmusters und zum Speichern bitte verbinden.');
+    if (!key) return h('p', { class: 'calib-device warn' }, t('calib.noPrinter'));
     const stored = loadCalibration(key);
     const spec = driver.deviceSpec();
-    if (!spec) return h('p', { class: 'calib-device warn' }, `Gerät: ${dev?.productName ?? 'unbekannt'} (${key}). ${UNSUPPORTED_MESSAGE}`);
+    const device = t('calib.device', { device: dev?.productName ?? t('common.unknown'), key });
+    if (!spec) return h('p', { class: 'calib-device warn' }, `${device} ${t('printerError.unsupportedModel')}`);
     return h('p', { class: 'calib-device' },
-      `Gerät: ${dev?.productName ?? 'unbekannt'} (${key}). `,
-      stored ? `Gespeicherte Kalibrierung vom ${new Date(stored.savedAt ?? '').toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}.` : 'Es gelten die Standardwerte.',
-      spec.status === 'experimental' ? ` Der ${spec.name} ist noch nicht getestet und startet ohne Korrekturen: hier einmal einmessen.` : '');
+      `${device} `,
+      stored ? t('calib.storedFrom', { date: formatDateTime(stored.savedAt ?? '') }) : t('calib.defaults'),
+      spec.status === 'experimental' ? ` ${t('calib.experimental', { model: spec.name })}` : '');
   };
 
   const render = () => {
-    steps.replaceChildren(...STEPS.map((s, i) =>
+    steps.replaceChildren(...STEPS().map((s, i) =>
       h('li', { class: i === st.step ? 'current' : i < st.step ? 'done' : '', 'aria-current': i === st.step ? 'step' : undefined }, `${i + 1}. ${s}`)));
     body.replaceChildren(...[renderChoose, renderPrint, renderMeasure, renderResult][st.step]());
     bar.replaceChildren(...buttons());
@@ -95,14 +119,14 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
   // ---------- step 1: medium ----------
 
   function renderChoose(): Node[] {
-    const seg = h('div', { class: 'segmented', role: 'radiogroup', 'aria-label': 'Druckwerk' });
+    const seg = h('div', { class: 'segmented', role: 'radiogroup', 'aria-label': t('engine.aria') });
     if (!host.media().some((m) => m.id === st.mediaId)) {
       st.mediaId = media().id;
       st.target = media().target;
       st.printedWith = null;
     }
     const engines = (['label', 'tape'] as const).filter((t) => host.media().some((m) => m.target === t && calibratable(m)));
-    for (const [v, label] of ([['label', 'Etikett'], ['tape', 'Band']] as const).filter(([t]) => engines.includes(t))) {
+    for (const [v, label] of ([['label', t('engine.label')], ['tape', t('engine.tape')]] as const).filter(([e]) => engines.includes(e))) {
       const input = h('input', { type: 'radio', name: 'calibEngine', value: v, checked: st.target === v });
       input.addEventListener('change', () => {
         st.target = v;
@@ -112,24 +136,22 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
       });
       seg.append(h('label', {}, input, ' ', h('span', {}, label)));
     }
-    const select = h('select', { 'aria-label': 'Eingelegtes Medium' },
-      ...host.media().filter((m) => m.target === st.target && calibratable(m)).map((m) => h('option', { value: m.id }, m.name)));
+    const select = h('select', { 'aria-label': t('calib.medium') },
+      ...host.media().filter((m) => m.target === st.target && calibratable(m)).map((m) => h('option', { value: m.id }, mediaName(m))));
     select.value = st.mediaId;
     select.addEventListener('change', () => { st.mediaId = select.value; st.printedWith = null; render(); });
     const cal = driver.activeCalibration();
     const m = media();
     const current = m.target === 'label'
-      ? `Aktuell: Versatz quer ${cal.label.headOffsetDots} Punkte, Druckbeginn ${fmt(cal.label.feedStartDots)} Punkte, Vorschub-Faktor ${fmt(cal.label.feedScale, 5)}.`
-      : `Aktuell: Korrektur für ${m.widthMm}-mm-Band ${cal.tape.centerCorrectionDots[m.widthMm] ?? 0} Punkte.`;
+      ? t('calib.currentLabel', { offset: cal.label.headOffsetDots, start: fmt(cal.label.feedStartDots), scale: fmt(cal.label.feedScale, 5) })
+      : t('calib.currentTape', { width: m.widthMm, value: cal.tape.centerCorrectionDots[m.widthMm] ?? 0 });
     return [
-      h('p', {}, 'Die Kalibrierung gleicht aus, wo dein Drucker tatsächlich druckt. Sie wird für dieses Druckermodell in diesem Browser gespeichert und bei jedem Druck verwendet.'),
+      h('p', {}, t('calib.intro')),
       deviceLine(),
-      h('div', { class: 'field' }, h('span', {}, 'Druckwerk'), seg),
-      h('label', { class: 'field' }, h('span', {}, 'Eingelegtes Medium'), select),
+      h('div', { class: 'field' }, h('span', {}, t('calib.engine')), seg),
+      h('label', { class: 'field' }, h('span', {}, t('calib.medium')), select),
       h('p', { class: 'muted small' }, current),
-      m.target === 'label'
-        ? h('p', { class: 'muted small' }, 'Etiketten: Länge und Querlage werden kalibriert. Endlospapier eignet sich nicht, weil eine feste Etikettenkante fehlt.')
-        : h('p', { class: 'muted small' }, 'Band: die Mittenlage quer zum Band wird für die gewählte Bandbreite kalibriert.'),
+      h('p', { class: 'muted small' }, t(m.target === 'label' ? 'calib.labelInfo' : 'calib.tapeInfo')),
     ];
   }
 
@@ -138,21 +160,21 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
   async function printPattern(): Promise<void> {
     if (!driver.isConnected() && !(await host.connect())) return;
     const m = media();
-    const blocked = printBlockReason(driver.deviceSpec(), m.target);
+    const blocked = printBlocker(driver.deviceSpec(), m.target);
     if (blocked) {
       render();
-      throw new Error(blocked);
+      throw blocked;
     }
     st.busy = true;
     render();
     try {
       const status = await driver.getStatus(m.target).catch(() => null);
-      if (status?.paperOut) throw new Error(m.target === 'tape' ? 'Kein Band eingelegt oder Band leer.' : 'Keine Etiketten eingelegt oder Rolle leer.');
+      if (status?.paperOut) throw new LocalizedError(m.target === 'tape' ? 'error.noTape' : 'error.noLabels');
       const used = driver.activeCalibration();
       await driver.print({ image: patternImageData(m), media: m }, { copies: 1, lengthMm: m.lengthMm === null ? patternLengthMm(m) : undefined });
       st.printedWith = used;
       st.printedMediaId = m.id;
-      toast(driver.simulated ? 'Testmuster simuliert gedruckt.' : 'Testmuster gesendet.', 'ok');
+      toast(t(driver.simulated ? 'calib.patternSimulated' : 'calib.patternSent'), 'ok');
     } finally {
       st.busy = false;
       render();
@@ -162,13 +184,13 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
   function renderPrint(): Node[] {
     const m = media();
     const img = threshold(patternImageData(m)).image;
-    const cv = h('canvas', { class: 'calib-pattern', role: 'img', 'aria-label': 'Vorschau des Testmusters' });
+    const cv = h('canvas', { class: 'calib-pattern', role: 'img', 'aria-label': t('calib.patternAria') });
     cv.width = img.width;
     cv.height = img.height;
     cv.getContext('2d')!.putImageData(img, 0, 0);
     const consumes = m.target === 'label'
-      ? `Verbraucht ein Etikett (${m.name}).`
-      : `Verbraucht etwa ${Math.round(Math.max(patternLengthMm(m), 40))} mm Band (${m.widthMm} mm).`;
+      ? t('calib.consumesLabel', { media: mediaName(m) })
+      : t('calib.consumesTape', { length: Math.round(Math.max(patternLengthMm(m), 40)), width: m.widthMm });
     const already = h('input', { type: 'checkbox', checked: !!st.printedWith && st.printedMediaId === m.id });
     already.addEventListener('change', () => {
       st.printedWith = already.checked ? driver.activeCalibration() : null;
@@ -176,63 +198,63 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
       render();
     });
     return [
-      h('p', {}, 'Das Testmuster zeigt einen Rahmen um den druckbaren Bereich, ein großes Quadrat oben links, ein kleines unten links und nummerierte Striche alle 10 mm, gemessen ab der linken Etikettenkante.'),
+      h('p', {}, t('calib.patternIntro')),
       h('div', { class: 'calib-pattern-wrap' }, cv),
       h('p', { class: 'calib-device' + (driver.isConnected() ? '' : ' warn') },
-        driver.isConnected() ? consumes : `Kein Drucker verbunden. ${consumes}`),
+        driver.isConnected() ? consumes : t('calib.noPrinterConsumes', { consumes })),
       h('div', { class: 'btnrow' },
-        btn(driver.isConnected() ? 'Testmuster drucken' : 'Verbinden und drucken', printPattern, { primary: !st.printedWith, icon: 'printer' })),
-      h('label', { class: 'check' }, already, 'Ich habe das Testmuster mit der aktuellen Kalibrierung schon gedruckt.'),
-      st.printedWith ? h('p', { class: 'ok-text small' }, 'Bereit zum Messen. Lass den Ausdruck kurz abkühlen und lege ihn flach hin.') : null,
+        btn(t(driver.isConnected() ? 'calib.printPattern' : 'calib.connectAndPrint'), printPattern, { primary: !st.printedWith, icon: 'printer' })),
+      h('label', { class: 'check' }, already, t('calib.alreadyPrinted')),
+      st.printedWith ? h('p', { class: 'ok-text small' }, t('calib.readyToMeasure')) : null,
     ].filter(Boolean) as Node[];
   }
 
   // ---------- step 3: measure ----------
 
   const mmField = (key: keyof typeof st.inputs, label: string, letter: string, expected: number) => {
-    const input = h('input', { type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: fmt(expected), 'aria-label': `${letter}: ${label} in mm` });
+    const input = h('input', { type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: fmt(expected), 'aria-label': t('calib.fieldAria', { letter, label }) });
     input.value = st.inputs[key];
     input.addEventListener('input', () => { st.inputs[key] = input.value; });
     return h('label', { class: 'calib-field' },
       h('span', { class: 'calib-letter', 'aria-hidden': 'true' }, letter),
-      h('span', { class: 'calib-label' }, label, h('small', { class: 'muted' }, ` Soll etwa ${fmt(expected)} mm`)),
+      h('span', { class: 'calib-label' }, label, h('small', { class: 'muted' }, ` ${t('calib.expected', { value: fmt(expected) })}`)),
       h('span', { class: 'calib-input' }, input, ' mm'));
   };
 
   function renderMeasure(): Node[] {
     const m = media();
-    const t = measurementTargets(m);
+    const tg = measurementTargets(m);
     const out: Node[] = [];
     const diagram = h('div', { class: 'calib-diagram' });
     if (m.target === 'label') {
-      if (!st.inputs.tick || !t.ticks.some((x) => String(x.mm) === st.inputs.tick)) st.inputs.tick = String(t.ticks[t.ticks.length - 1]?.mm ?? '');
+      if (!st.inputs.tick || !tg.ticks.some((x) => String(x.mm) === st.inputs.tick)) st.inputs.tick = String(tg.ticks[tg.ticks.length - 1]?.mm ?? '');
       diagram.innerHTML = labelDiagram(st.inputs.tick);
-      const tickSel = h('select', { class: 'calib-tick', 'aria-label': 'Strich für Messung B' },
-        ...t.ticks.map((x) => h('option', { value: String(x.mm) }, `Strich „${x.mm}“`)));
+      const tickSel = h('select', { class: 'calib-tick', 'aria-label': t('calib.tickAria') },
+        ...tg.ticks.map((x) => h('option', { value: String(x.mm) }, t('calib.tickOption', { tick: x.mm }))));
       tickSel.value = st.inputs.tick;
       tickSel.addEventListener('change', () => { st.inputs.tick = tickSel.value; render(); });
-      const tickMm = t.ticks.find((x) => String(x.mm) === st.inputs.tick)?.xMm ?? 0;
-      const fieldB = mmField('b', 'Linke Etikettenkante bis Mitte von', 'B', tickMm);
+      const tickMm = tg.ticks.find((x) => String(x.mm) === st.inputs.tick)?.xMm ?? 0;
+      const fieldB = mmField('b', t('calib.fieldB'), 'B', tickMm);
       fieldB.querySelector('.calib-label')!.insertBefore(tickSel, fieldB.querySelector('.calib-label small'));
       out.push(
-        h('p', {}, 'Halte das Etikett so, dass das große Quadrat oben links ist. Miss mit einem Lineal in Millimetern, möglichst auf 0,5 mm genau.'),
+        h('p', {}, t('calib.measureLabelIntro')),
         diagram,
         h('ul', { class: 'calib-rules small' },
-          h('li', {}, h('strong', {}, 'Immer ab der Etikettenkante messen'), ', nicht ab dem Rahmen.'),
-          h('li', {}, 'Zur Rahmenlinie: bis zu ihrer äußeren Kante. Zum Strich: bis zur Strichmitte. Die Zahl über dem Strich ist sein Sollabstand in mm.')),
-        mmField('a', 'Linke Etikettenkante bis linke Rahmenlinie', 'A', t.frameXMm),
+          h('li', {}, h('strong', {}, t('calib.ruleEdgeStrong')), t('calib.ruleEdgeRest')),
+          h('li', {}, t('calib.ruleLines'))),
+        mmField('a', t('calib.fieldA'), 'A', tg.frameXMm),
         fieldB,
-        mmField('c', 'Untere Etikettenkante bis untere Rahmenlinie', 'C', t.bottomMm),
-        h('p', { class: 'muted small' }, 'A und B kalibrieren die Länge (nur zusammen), C die Querlage. Ein leeres Feld lässt den jeweiligen Wert unverändert.'),
+        mmField('c', t('calib.fieldC'), 'C', tg.bottomMm),
+        h('p', { class: 'muted small' }, t('calib.labelMeasureNote')),
       );
     } else {
       diagram.innerHTML = tapeDiagram();
       out.push(
-        h('p', {}, 'Halte das Band so, dass das große Quadrat oben links ist. Miss quer zum Band von der Bandkante bis zur äußeren Kante der Rahmenlinie.'),
+        h('p', {}, t('calib.measureTapeIntro')),
         diagram,
-        mmField('top', 'Obere Bandkante bis obere Rahmenlinie', 'D', t.gapMm),
-        mmField('bottom', 'Untere Bandkante bis untere Rahmenlinie', 'E', t.gapMm),
-        h('p', { class: 'muted small' }, `Die Korrektur gilt nur für ${m.widthMm}-mm-Band. Ist das Muster zu klein zum Messen, lieber mit einer Lupe als geschätzt.`),
+        mmField('top', t('calib.fieldD'), 'D', tg.gapMm),
+        mmField('bottom', t('calib.fieldE'), 'E', tg.gapMm),
+        h('p', { class: 'muted small' }, t('calib.tapeMeasureNote', { width: m.widthMm })),
       );
     }
     return out;
@@ -244,17 +266,17 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
     const bad = (v: number | null) => v !== null && !Number.isFinite(v);
     if (m.target === 'label') {
       const a = val(st.inputs.a), b = val(st.inputs.b), c = val(st.inputs.c);
-      if (bad(a) || bad(b) || bad(c)) return 'Bitte nur Zahlen eingeben, z. B. 6,5.';
-      if ((a === null) !== (b === null)) return 'A und B bitte gemeinsam ausfüllen (oder beide leer lassen).';
-      if (a === null && c === null) return 'Bitte mindestens A und B oder C ausfüllen.';
+      if (bad(a) || bad(b) || bad(c)) return t('calib.numbersOnly', { example: fmt(6.5) });
+      if ((a === null) !== (b === null)) return t('calib.abTogether');
+      if (a === null && c === null) return t('calib.atLeast');
       return {
         labelFeed: a !== null && b !== null ? { frameMeasuredMm: a, tickMm: Number(st.inputs.tick), tickMeasuredMm: b } : undefined,
         labelAcross: c !== null ? { bottomMeasuredMm: c } : undefined,
       };
     }
     const top = val(st.inputs.top), bottom = val(st.inputs.bottom);
-    if (top === null || bottom === null) return 'Bitte beide Abstände D und E eingeben.';
-    if (bad(top) || bad(bottom)) return 'Bitte nur Zahlen eingeben, z. B. 2,5.';
+    if (top === null || bottom === null) return t('calib.bothGaps');
+    if (bad(top) || bad(bottom)) return t('calib.numbersOnly', { example: fmt(2.5) });
     return { tape: { gapTopMm: top, gapBottomMm: bottom } };
   }
 
@@ -264,29 +286,27 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
     const s = st.solution!;
     const m = media();
     const out: Node[] = [];
-    if (s.errors.length) out.push(h('div', { class: 'calib-errors', role: 'alert' }, ...s.errors.map((e) => h('p', {}, e))));
+    if (s.errors.length) out.push(h('div', { class: 'calib-errors', role: 'alert' }, ...s.errors.map((e) => h('p', {}, issueText(e)))));
     if (s.changes.length) {
       const mmPerDot = 25.4 / m.dpi;
       out.push(h('table', { class: 'calib-table' },
-        h('thead', {}, h('tr', {}, h('th', {}, 'Wert'), h('th', {}, 'Bisher'), h('th', {}, 'Neu'), h('th', {}, 'Wirkung'))),
+        h('thead', {}, h('tr', {}, h('th', {}, t('calib.colValue')), h('th', {}, t('calib.colBefore')), h('th', {}, t('calib.colAfter')), h('th', {}, t('calib.colEffect')))),
         h('tbody', {}, ...s.changes.map((c) => {
           const diff = c.after - c.before;
           const effect = c.key === 'feedScale'
-            ? `${fmt(Math.abs(diff) * (m.lengthMm ?? 0), 2)} mm auf ${m.lengthMm} mm Länge`
-            : `${diff === 0 ? '0' : fmt(Math.abs(diff) * mmPerDot, 2)} mm`;
+            ? t('calib.effectFeed', { mm: fmt(Math.abs(diff) * (m.lengthMm ?? 0), 2), length: m.lengthMm ?? 0 })
+            : t('calib.effectMm', { mm: diff === 0 ? '0' : fmt(Math.abs(diff) * mmPerDot, 2) });
           const digits = c.key === 'feedScale' ? 5 : c.key === 'feedStartDots' ? 1 : 0;
           return h('tr', { class: diff === 0 ? 'same' : '' },
-            h('td', {}, c.label), h('td', {}, fmt(c.before, digits)), h('td', {}, h('strong', {}, fmt(c.after, digits))), h('td', { class: 'muted' }, effect));
+            h('td', {}, changeLabel(c)), h('td', {}, fmt(c.before, digits)), h('td', {}, h('strong', {}, fmt(c.after, digits))), h('td', { class: 'muted' }, effect));
         }))));
-      if (s.changes.every((c) => c.after === c.before)) out.push(h('p', { class: 'ok-text' }, 'Der Druck sitzt bereits richtig, es gibt nichts zu korrigieren.'));
+      if (s.changes.every((c) => c.after === c.before)) out.push(h('p', { class: 'ok-text' }, t('calib.alreadyCorrect')));
     }
     if (st.saved) {
-      out.push(h('p', { class: 'ok-text' }, `Gespeichert für ${driver.deviceKey() ?? 'dieses Gerät'}. Ab jetzt wird jeder Druck damit ausgeführt.`));
-      out.push(h('p', { class: 'muted small' }, 'Zur Kontrolle ein weiteres Testmuster drucken und wieder messen. Die Werte sollten jetzt nahe am Soll liegen.'));
+      out.push(h('p', { class: 'ok-text' }, t('calib.savedFor', { key: driver.deviceKey() ?? t('calib.thisDevice') })));
+      out.push(h('p', { class: 'muted small' }, t('calib.verifyHint')));
     } else if (!s.errors.length || s.changes.length) {
-      out.push(h('p', { class: 'muted small' }, s.errors.length
-        ? 'Nur die fehlerfreien Messungen werden übernommen. Oder zurück und nachmessen.'
-        : 'Mit „Speichern“ übernehmen.'));
+      out.push(h('p', { class: 'muted small' }, t(s.errors.length ? 'calib.partial' : 'calib.applyHint')));
     }
     return out;
   }
@@ -294,11 +314,11 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
   async function save(): Promise<void> {
     if (!driver.deviceKey() && !(await host.connect())) return;
     const key = driver.deviceKey();
-    if (!key) throw new Error('Kein Drucker verbunden.');
-    if (!driver.deviceSpec()) throw new Error(UNSUPPORTED_MESSAGE);
+    if (!key) throw new LocalizedError('calib.notConnected');
+    if (!driver.deviceSpec()) throw printBlocker(null, st.target)!;
     saveCalibration(key, st.solution!.calibration);
     st.saved = true;
-    toast('Kalibrierung gespeichert.', 'ok');
+    toast(t('calib.saved'), 'ok');
     render();
   }
 
@@ -315,34 +335,34 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
 
   async function reset(): Promise<void> {
     const key = driver.deviceKey();
-    if (!key) { toast('Kein Drucker verbunden.', 'error'); return; }
-    if (!loadCalibration(key)) { toast('Es gelten bereits die Standardwerte.', 'info'); return; }
-    if (!confirm('Gespeicherte Kalibrierung für dieses Gerät löschen und die Standardwerte verwenden?')) return;
+    if (!key) { toast(t('calib.notConnected'), 'error'); return; }
+    if (!loadCalibration(key)) { toast(t('calib.alreadyDefault'), 'info'); return; }
+    if (!confirm(t('calib.confirmReset'))) return;
     resetCalibration(key);
     st.printedWith = null;
-    toast('Kalibrierung zurückgesetzt, es gelten die Standardwerte.', 'ok');
+    toast(t('calib.resetDone'), 'ok');
     render();
   }
 
   // ---------- navigation ----------
 
   function buttons(): Node[] {
-    const close = btn(st.saved ? 'Fertig' : 'Abbrechen', () => dlg.close(), { primary: st.saved });
-    const back = btn('Zurück', () => { st.step--; st.saved = false; render(); });
+    const close = btn(t(st.saved ? 'common.done' : 'common.cancel'), () => dlg.close(), { primary: st.saved });
+    const back = btn(t('common.back'), () => { st.step--; st.saved = false; render(); });
     const left: Node[] = [];
     const right: Node[] = [];
     switch (st.step) {
       case 0: {
         const hasStored = !!(driver.deviceKey() && loadCalibration(driver.deviceKey()!));
-        left.push(btn('Auf Standard zurücksetzen', reset, { icon: 'rotate-ccw', disabled: !hasStored }));
-        right.push(close, btn('Weiter', () => { st.step = 1; render(); }, { primary: true }));
+        left.push(btn(t('calib.reset'), reset, { icon: 'rotate-ccw', disabled: !hasStored }));
+        right.push(close, btn(t('common.next'), () => { st.step = 1; render(); }, { primary: true }));
         break;
       }
       case 1:
-        right.push(close, back, btn('Weiter', () => { st.step = 2; render(); }, { primary: !!st.printedWith, disabled: !st.printedWith || st.printedMediaId !== st.mediaId }));
+        right.push(close, back, btn(t('common.next'), () => { st.step = 2; render(); }, { primary: !!st.printedWith, disabled: !st.printedWith || st.printedMediaId !== st.mediaId }));
         break;
       case 2:
-        right.push(close, back, btn('Berechnen', () => {
+        right.push(close, back, btn(t('calib.calculate'), () => {
           const input = collect();
           if (typeof input === 'string') { toast(input, 'error'); return; }
           st.solution = solveCalibration(media(), st.printedWith ?? driver.activeCalibration(), input);
@@ -354,8 +374,8 @@ export function openCalibrationWizard(host: CalibrationHost): Promise<void> {
       case 3: {
         const s = st.solution!;
         const changed = s.changes.some((c) => c.after !== c.before);
-        if (st.saved) right.push(btn('Kontrolldruck', verify, { icon: 'printer' }), close);
-        else right.push(close, back, btn('Speichern', save, { primary: true, disabled: !changed }));
+        if (st.saved) right.push(btn(t('calib.verify'), verify, { icon: 'printer' }), close);
+        else right.push(close, back, btn(t('common.save'), save, { primary: true, disabled: !changed }));
         break;
       }
     }
@@ -380,7 +400,7 @@ function labelDiagram(tick: string): string {
   const yBot = F.y + F.h;
   const arrow = (x1: number, y1: number, x2: number, y2: number) =>
     `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="dim" marker-start="url(#ca)" marker-end="url(#ca)"/>`;
-  return `<svg viewBox="0 0 340 196" role="img" aria-label="Skizze: Messung A, B und C am Etikett" style="${SVG_STYLE}">
+  return `<svg viewBox="0 0 340 196" role="img" aria-label="${esc(t('calib.diagramLabelAria'))}" style="${SVG_STYLE}">
   <defs><marker id="ca" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" class="dimhead"/></marker></defs>
   <rect x="${L.x}" y="${L.y}" width="${L.w}" height="${L.h}" rx="5" class="paper"/>
   <rect x="${F.x}" y="${F.y}" width="${F.w}" height="${F.h}" class="frame"/>
@@ -392,7 +412,7 @@ function labelDiagram(tick: string): string {
   <line x1="${tickX}" y1="${yBot}" x2="${tickX}" y2="${L.y + L.h + 34}" class="ext"/>
   ${arrow(L.x, L.y + L.h + 28, tickX, L.y + L.h + 28)}<text x="${(L.x + tickX) / 2}" y="${L.y + L.h + 22}" class="letter">B</text>
   ${arrow(L.x + 160, yBot, L.x + 160, L.y + L.h)}<text x="${L.x + 172}" y="${L.y + L.h - 3}" class="letter">C</text>
-  <text x="${L.x + L.w / 2}" y="${L.y + L.h + 50}" class="cap">Linke Kante = Anfang des Etiketts (kommt zuerst aus dem Drucker)</text>
+  <text x="${L.x + L.w / 2}" y="${L.y + L.h + 50}" class="cap">${esc(t('calib.diagramLabelCaption'))}</text>
 </svg>`;
 }
 
@@ -401,7 +421,7 @@ function tapeDiagram(): string {
   const F = { x: T.x + 46, y: T.y + 16, w: 230, h: 48 };
   const arrow = (x1: number, y1: number, x2: number, y2: number) =>
     `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="dim" marker-start="url(#cb)" marker-end="url(#cb)"/>`;
-  return `<svg viewBox="0 0 340 130" role="img" aria-label="Skizze: Messung D und E am Band" style="${SVG_STYLE}">
+  return `<svg viewBox="0 0 340 130" role="img" aria-label="${esc(t('calib.diagramTapeAria'))}" style="${SVG_STYLE}">
   <defs><marker id="cb" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" class="dimhead"/></marker></defs>
   <rect x="${T.x}" y="${T.y}" width="${T.w}" height="${T.h}" class="paper"/>
   <rect x="${F.x}" y="${F.y}" width="${F.w}" height="${F.h}" class="frame"/>
@@ -409,6 +429,6 @@ function tapeDiagram(): string {
   <rect x="${F.x + 4}" y="${F.y + F.h - 13}" width="9" height="9" class="ink"/>
   ${arrow(F.x + 120, T.y, F.x + 120, F.y)}<text x="${F.x + 132}" y="${T.y + 12}" class="letter">D</text>
   ${arrow(F.x + 120, F.y + F.h, F.x + 120, T.y + T.h)}<text x="${F.x + 132}" y="${T.y + T.h - 3}" class="letter">E</text>
-  <text x="${T.x + T.w / 2}" y="${T.y + T.h + 20}" class="cap">D und E quer zum Band messen. Gleich groß = mittig.</text>
+  <text x="${T.x + T.w / 2}" y="${T.y + T.h + 20}" class="cap">${esc(t('calib.diagramTapeCaption'))}</text>
 </svg>`;
 }

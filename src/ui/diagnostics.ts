@@ -1,4 +1,4 @@
-// "Druckerprofil / Diagnose": collect what we need to support a printer, download it as JSON
+// Printer profile / diagnostics: collect what we need to support a printer, download it as JSON
 // or open a prefilled GitHub issue. Report building is pure (src/printer/diagnostics.ts).
 import type { Media, PrintTarget } from '../printer/types';
 import { loadCalibration } from '../printer/calibration';
@@ -14,11 +14,19 @@ import {
 import { APP_BUILD_DATE, APP_COMMIT, APP_VERSION } from '../build-info';
 import type { CalibrationDriver } from './calibration';
 import { h, num, toast } from './dom';
+import { t } from '../i18n';
+import { statusText } from '../i18n/errors';
+import { engineName, mediaName } from './media-text';
 
 export interface DiagnosticsHost {
   driver: CalibrationDriver;
   media: Media;
   errorText(e: unknown): string;
+}
+
+function calSource(r: PrinterReport): string {
+  const source = t(r.calibration.source === 'stored' ? 'diag.calStored' : 'diag.calDefaults');
+  return r.calibration.deviceKey ? t('diag.calSourceFor', { source, key: r.calibration.deviceKey }) : source;
 }
 
 function download(report: PrinterReport) {
@@ -37,12 +45,12 @@ export function openDiagnostics(host: DiagnosticsHost): Promise<void> {
   let deviceIds: DeviceIdEntry[] = [];
   let readError: string | null = null;
 
-  const dlg = h('dialog', { class: 'diag-dialog', 'aria-label': 'Druckerprofil / Diagnose' });
+  const dlg = h('dialog', { class: 'diag-dialog', 'aria-label': t('diag.title') });
   const content = h('div', { class: 'diag-content' });
   const note = h('textarea', {
     rows: 3,
-    'aria-label': 'Notiz',
-    placeholder: 'Was funktioniert, was nicht? Druckermodell laut Typenschild, Betriebssystem, eingelegtes Medium ...',
+    'aria-label': t('diag.note'),
+    placeholder: t('diag.notePlaceholder'),
   });
   const notice = h('p', { class: 'diag-notice', role: 'status', hidden: true });
   const raw = h('pre', { class: 'diag-json' });
@@ -72,34 +80,39 @@ export function openDiagnostics(host: DiagnosticsHost): Promise<void> {
     const rows: Node[] = [];
     if (d) {
       rows.push(
-        row('Gerät', `${d.productName ?? 'unbekannt'}${d.manufacturerName ? ` (${d.manufacturerName})` : ''}`),
-        row('USB-Kennung', `Hersteller ${d.vendorId}, Produkt ${d.productId}`),
-        row('Unterstützung', r.support?.status === 'verified'
-          ? `${r.support.model}: getestet`
+        row(t('diag.device'), `${d.productName ?? t('common.unknown')}${d.manufacturerName ? ` (${d.manufacturerName})` : ''}`),
+        row(t('diag.usbId'), t('diag.usbIdValue', { vendor: d.vendorId, product: d.productId })),
+        row(t('diag.support'), r.support?.status === 'verified'
+          ? t('diag.verified', { model: r.support.model ?? '' })
           : r.support?.status === 'experimental'
-            ? `${r.support.model}: experimentell, noch nicht getestet. Eine Rückmeldung hilft sehr.`
-            : 'Modell unbekannt, Drucken ist gesperrt. Bitte diesen Bericht senden.'),
-        row('Schnittstellen', h('ul', { class: 'diag-list' }, ...d.interfaces.map((i) =>
-          h('li', {}, `#${i.number}${i.name ? ` ${i.name}` : ''}${i.interfaceClass !== null ? `, Klasse ${i.interfaceClass}` : ''}: `,
+            ? t('diag.experimental', { model: r.support.model ?? '' })
+            : t('diag.unknownModel')),
+        row(t('diag.interfaces'), h('ul', { class: 'diag-list' }, ...d.interfaces.map((i) =>
+          h('li', {}, `#${i.number}${i.name ? ` ${i.name}` : ''}${i.interfaceClass !== null ? `, ${t('diag.interfaceClass', { n: i.interfaceClass })}` : ''}: `,
             i.endpoints.map((e) => `${e.direction === 'in' ? 'IN' : 'OUT'} ${hex(e.number | (e.direction === 'in' ? 0x80 : 0), 2)} (${e.packetSize} B)`).join(', '))))),
-        row('Geräte-ID (IEEE 1284)', r.deviceIds.length
-          ? h('ul', { class: 'diag-list' }, ...r.deviceIds.map((x) => h('li', {}, `#${x.interface}: `, x.value !== null ? h('code', {}, x.value) : `nicht lesbar (${x.error ?? 'unbekannt'})`)))
-          : readError ? `nicht lesbar (${readError})` : 'wird gelesen ...'),
+        row(t('diag.deviceId'), r.deviceIds.length
+          ? h('ul', { class: 'diag-list' }, ...r.deviceIds.map((x) => h('li', {}, `#${x.interface}: `, x.value !== null ? h('code', {}, x.value) : t('diag.unreadable', { error: x.error ?? t('common.unknown') }))))
+          : readError ? t('diag.unreadable', { error: readError }) : t('diag.reading')),
       );
     } else {
-      rows.push(row('Gerät', 'Kein Drucker verbunden. Bitte zuerst „Verbinden“, dann diese Ansicht erneut öffnen.'));
+      rows.push(row(t('diag.device'), t('diag.noDevice')));
     }
+    const snapshots = driver.lastStatuses();
     const statuses = Object.entries(r.lastStatus) as [PrintTarget, PrinterReport['lastStatus'][PrintTarget]][];
     rows.push(
-      row('Letzter Status', statuses.length
-        ? h('ul', { class: 'diag-list' }, ...statuses.map(([t, s]) => h('li', {}, `${t === 'tape' ? 'Band' : 'Etikett'}: `, h('code', {}, s!.raw || '(leer)'), ` ${s!.message}`)))
-        : 'noch nicht abgefragt'),
-      row('Kalibrierung', `${r.calibration.source === 'stored' ? 'gespeichert' : 'Standardwerte'}${r.calibration.deviceKey ? ` für ${r.calibration.deviceKey}` : ''}: ` +
-        `quer ${r.calibration.values.label.headOffsetDots}, Beginn ${num(r.calibration.values.label.feedStartDots)}, Faktor ${num(r.calibration.values.label.feedScale, 5)}, ` +
-        `Band ${Object.entries(r.calibration.values.tape.centerCorrectionDots).map(([w, v]) => `${w} mm: ${v}`).join(', ')}`),
-      row('Medium', r.media ? r.media.name : '-'),
-      row('App', `${r.app.version} (${r.app.commit}, ${r.app.buildDate})`),
-      row('Browser', r.userAgent),
+      row(t('diag.lastStatus'), statuses.length
+        ? h('ul', { class: 'diag-list' }, ...statuses.map(([target, s]) => h('li', {}, `${engineName(target)}: `,
+          h('code', {}, s!.raw || t('diag.empty')), ` ${statusText(snapshots[target]?.code, s!.message)}`)))
+        : t('diag.notQueried')),
+      row(t('diag.calibration'), `${calSource(r)}: ${t('diag.calValues', {
+        offset: r.calibration.values.label.headOffsetDots,
+        start: num(r.calibration.values.label.feedStartDots),
+        scale: num(r.calibration.values.label.feedScale, 5),
+        tape: Object.entries(r.calibration.values.tape.centerCorrectionDots).map(([w, v]) => `${w} mm: ${v}`).join(', '),
+      })}`),
+      row(t('diag.media'), mediaName(host.media)),
+      row(t('diag.app'), `${r.app.version} (${r.app.commit}, ${r.app.buildDate})`),
+      row(t('diag.browser'), r.userAgent),
     );
     content.replaceChildren(h('table', { class: 'diag-table' }, h('tbody', {}, ...rows)));
     raw.textContent = JSON.stringify(r, null, 2);
@@ -125,8 +138,8 @@ export function openDiagnostics(host: DiagnosticsHost): Promise<void> {
   note.addEventListener('input', () => { raw.textContent = JSON.stringify(report(), null, 2); });
 
   const actions = h('div', { class: 'dialog-actions' },
-    h('button', { type: 'button', class: 'diag-refresh', icon: 'rotate-ccw', onclick: () => { void refresh(); } }, 'Neu einlesen'),
-    h('button', { type: 'button', icon: 'download', onclick: () => { download(report()); toast('Bericht heruntergeladen.', 'ok'); } }, 'JSON herunterladen'),
+    h('button', { type: 'button', class: 'diag-refresh', icon: 'rotate-ccw', onclick: () => { void refresh(); } }, t('diag.refresh')),
+    h('button', { type: 'button', icon: 'download', onclick: () => { download(report()); toast(t('diag.downloaded'), 'ok'); } }, t('diag.download')),
     h('button', {
       type: 'button',
       icon: 'external-link',
@@ -136,20 +149,20 @@ export function openDiagnostics(host: DiagnosticsHost): Promise<void> {
         if (!link.complete) {
           download(r);
           notice.hidden = false;
-          notice.textContent = 'Der Bericht ist zu lang für den Link. Die JSON-Datei wurde heruntergeladen: bitte im GitHub-Formular per Drag and Drop anhängen.';
+          notice.textContent = t('diag.tooLong');
         }
         window.open(link.url, '_blank', 'noopener');
       },
-    }, 'Auf GitHub melden'),
-    h('button', { type: 'button', class: 'primary', onclick: () => dlg.close() }, 'Schließen'),
+    }, t('diag.github')),
+    h('button', { type: 'button', class: 'primary', onclick: () => dlg.close() }, t('common.close')),
   );
 
   dlg.append(
-    h('h2', {}, 'Druckerprofil / Diagnose'),
-    h('p', { class: 'muted small' }, 'Diese Angaben helfen, weitere Druckermodelle zu unterstützen. Die Seriennummer wird nicht erfasst. Es wird nichts automatisch gesendet: du lädst den Bericht herunter oder öffnest ein vorausgefülltes GitHub-Issue (GitHub-Konto nötig) und schickst es selbst ab.'),
+    h('h2', {}, t('diag.title')),
+    h('p', { class: 'muted small' }, t('diag.intro')),
     content,
-    h('label', { class: 'field diag-note' }, h('span', {}, 'Notiz'), note),
-    h('details', { class: 'diag-details' }, h('summary', {}, 'Gesammelte Daten (JSON)'), raw),
+    h('label', { class: 'field diag-note' }, h('span', {}, t('diag.note')), note),
+    h('details', { class: 'diag-details' }, h('summary', {}, t('diag.details')), raw),
     notice,
     actions,
   );

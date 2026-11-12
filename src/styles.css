@@ -75,6 +75,12 @@ textarea { resize: vertical; min-height: 54px; }
 .brand { font-weight: 700; font-size: 14px; white-space: nowrap; }
 .brand span { font-weight: 400; color: var(--muted); }
 .brand .version { font-weight: 400; font-size: 11px; color: var(--muted); margin-left: 4px; }
+.brand .lang-switch { display: inline-flex; gap: 1px; margin-left: 8px; vertical-align: 1px; }
+.lang-switch button {
+  padding: 0 4px; font-size: 10.5px; line-height: 16px; border-color: transparent; background: transparent; color: var(--muted);
+}
+.lang-switch button:hover { border-color: var(--border); }
+.lang-switch button[aria-pressed='true'] { background: transparent; color: var(--text); border-color: var(--border); font-weight: 600; }
 .toolbar { display: flex; gap: 10px; flex-wrap: wrap; flex: 1; }
 .toolbar .group, .printbar { display: flex; gap: 4px; align-items: center; }
 .toolbar .group + .group { padding-left: 10px; border-left: 1px solid var(--border); }

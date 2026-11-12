@@ -106,7 +106,7 @@ describe('storage', () => {
     expect(loadCalibration('b', s)).toBeNull();
     const bad = cloneCalibration(DEFAULT_CALIBRATION);
     bad.label.feedScale = 2;
-    expect(() => saveCalibration('c', bad, s)).toThrow('Ungültige Kalibrierung');
+    expect(() => saveCalibration('c', bad, s)).toThrow('Invalid calibration');
     expect(loadCalibration('x', null)).toBeNull();
   });
 });

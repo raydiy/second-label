@@ -7,6 +7,7 @@
 
 import type { Calibration } from './types';
 import { DEFAULT_CALIBRATION } from './raster';
+import { PrinterError } from './errors';
 
 export { DEFAULT_CALIBRATION };
 
@@ -130,8 +131,8 @@ export function activeCalibration(key: string | null, store: KeyValueStore | nul
 
 export function saveCalibration(key: string, calibration: Calibration, store: KeyValueStore | null = browserStore()): void {
   const valid = normalizeCalibration(calibration);
-  if (!valid) throw new Error('Ungültige Kalibrierung, nicht gespeichert.');
-  if (!store) throw new Error('Der Browser erlaubt keinen lokalen Speicher, die Kalibrierung kann nicht gespeichert werden.');
+  if (!valid) throw new PrinterError('calibrationInvalid', 'Invalid calibration, not saved.');
+  if (!store) throw new PrinterError('storageUnavailable', 'The browser allows no local storage, the calibration cannot be saved.');
   store.setItem(
     CALIBRATION_STORAGE_PREFIX + key,
     JSON.stringify({ version: CALIBRATION_FORMAT_VERSION, savedAt: new Date().toISOString(), calibration: valid }),

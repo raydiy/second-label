@@ -8,6 +8,7 @@ import {
   deviceTargets,
   findDevice,
   printBlockReason,
+  printBlocker,
 } from '../devices';
 import { MEDIA, findMedia, mediaForDevice } from '../media';
 import { buildJob } from '../webusb-driver';
@@ -62,12 +63,14 @@ describe('device table', () => {
 });
 
 describe('printBlockReason', () => {
-  test('unknown model: German message pointing to the diagnostics', () => {
+  test('unknown model: message pointing to the diagnostics, with a code for the UI', () => {
     expect(printBlockReason(null, 'label')).toBe(UNSUPPORTED_MESSAGE);
-    expect(UNSUPPORTED_MESSAGE).toContain('Druckerprofil / Diagnose');
+    expect(UNSUPPORTED_MESSAGE).toContain('Printer profile / diagnostics');
+    expect(printBlocker(null, 'label')?.code).toBe('unsupportedModel');
   });
   test('tape on a label-only model is refused, labels are fine', () => {
-    expect(printBlockReason(spec(0x0020), 'tape')).toContain('kein Banddruckwerk');
+    expect(printBlockReason(spec(0x0020), 'tape')).toContain('no tape engine');
+    expect(printBlocker(spec(0x0020), 'tape')).toMatchObject({ code: 'noTapeEngine', params: { model: 'LabelWriter 450' } });
     expect(printBlockReason(spec(0x0020), 'label')).toBeNull();
     expect(printBlockReason(DUO_128, 'tape')).toBeNull();
   });
@@ -115,7 +118,7 @@ describe('jobs for other models', () => {
   test('450: a tape job is refused', () => {
     const m = findMedia('d1-12mm')!;
     expect(() => buildJob({ image: renderTestPattern(m) as unknown as ImageData, media: m }, { lengthMm: 60 }, { device: spec(0x0020) }))
-      .toThrow('kein Banddruckwerk');
+      .toThrow('no tape engine');
   });
 
   test('96-dot DUO tape job: 12 clean bytes, no line wider than 12 bytes, ends with a cut', () => {

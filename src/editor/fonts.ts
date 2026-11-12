@@ -1,4 +1,5 @@
 // Bundled web fonts (Fontsource, OFL-1.1). Served locally by Vite, no CDN at runtime.
+import { LocalizedError } from '../i18n/errors';
 import '@fontsource/inter/latin-400.css';
 import '@fontsource/inter/latin-700.css';
 import '@fontsource/inter/latin-400-italic.css';
@@ -30,17 +31,18 @@ import '@fontsource/jetbrains-mono/latin-700.css';
 import '@fontsource/jetbrains-mono/latin-400-italic.css';
 import '@fontsource/jetbrains-mono/latin-700-italic.css';
 
-export interface FontDef { family: string; label: string; italic: boolean }
+/** `hint` is a translated suffix in the font picker (font.<hint> in the locale files). */
+export interface FontDef { family: string; hint?: 'narrow' | 'serif' | 'mono'; italic: boolean }
 
 export const BUNDLED_FONTS: FontDef[] = [
-  { family: 'Inter', label: 'Inter', italic: true },
-  { family: 'Roboto', label: 'Roboto', italic: true },
-  { family: 'Roboto Condensed', label: 'Roboto Condensed (schmal)', italic: true },
-  { family: 'Barlow Condensed', label: 'Barlow Condensed (schmal)', italic: true },
-  { family: 'Archivo Narrow', label: 'Archivo Narrow (schmal)', italic: true },
-  { family: 'Oswald', label: 'Oswald (schmal)', italic: false },
-  { family: 'Merriweather', label: 'Merriweather (Serif)', italic: true },
-  { family: 'JetBrains Mono', label: 'JetBrains Mono (Mono)', italic: true },
+  { family: 'Inter', italic: true },
+  { family: 'Roboto', italic: true },
+  { family: 'Roboto Condensed', hint: 'narrow', italic: true },
+  { family: 'Barlow Condensed', hint: 'narrow', italic: true },
+  { family: 'Archivo Narrow', hint: 'narrow', italic: true },
+  { family: 'Oswald', hint: 'narrow', italic: false },
+  { family: 'Merriweather', hint: 'serif', italic: true },
+  { family: 'JetBrains Mono', hint: 'mono', italic: true },
 ];
 
 export const DEFAULT_FONT = 'Inter';
@@ -87,7 +89,7 @@ declare global {
 export const localFontsSupported = () => typeof window.queryLocalFonts === 'function';
 
 export async function queryLocalFamilies(): Promise<string[]> {
-  if (!window.queryLocalFonts) throw new Error('Diese Funktion gibt es nur in Chromium-Browsern (Chrome, Edge, Brave, Vivaldi).');
+  if (!window.queryLocalFonts) throw new LocalizedError('error.localFonts');
   const fonts = await window.queryLocalFonts();
   const bundled = new Set(BUNDLED_FONTS.map((f) => f.family));
   return [...new Set(fonts.map((f) => f.family))].filter((f) => !bundled.has(f)).sort((a, b) => a.localeCompare(b));

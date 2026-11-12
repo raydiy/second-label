@@ -20,7 +20,7 @@ export interface MonoBitmap {
 export interface Media {
   id: string;            // e.g. 'lw-99010', 'd1-12mm'
   target: PrintTarget;
-  name: string;          // human readable, e.g. '99010 Address 28 x 89 mm'
+  name: string;          // English reference name, e.g. '99010 Standard Address 28 x 89 mm' (UI: src/i18n)
   sku?: string;          // Dymo article number(s)
   widthMm: number;       // across the feed
   lengthMm: number | null; // along the feed; null = continuous (tape, continuous labels)
@@ -29,14 +29,36 @@ export interface Media {
   printable: { xMm: number; yMm: number; widthMm: number; heightMm: number };
   /** Tape only: allowed tape/text colour combos are informational. */
   notes?: string;
+  /** Tape only: shortest label the engine produces, cut to cut, in mm. */
+  minLengthMm?: number;
 }
+
+/** Decoded printer state, independent of any UI language (the UI translates it). */
+export type PrinterStatusCode =
+  | 'ready'
+  | 'readyNotTopOfForm'
+  | 'outOfLabels'
+  | 'paperJam'
+  | 'printerError'
+  | 'noCassette'
+  | 'generalError'
+  | 'cutterJam'
+  | 'headOverheat'
+  | 'busy'
+  | 'emptyReply'
+  | 'queryFailed'
+  | 'notConnected'
+  | 'blocked'
+  | 'simulated';
 
 export interface PrinterStatus {
   connected: boolean;
   ready?: boolean;
   paperOut?: boolean;
   raw?: Uint8Array;
+  /** English text for logs and the diagnostic report. */
   message?: string;
+  code?: PrinterStatusCode;
 }
 
 export interface PrintOptions {

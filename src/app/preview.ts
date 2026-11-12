@@ -1,10 +1,12 @@
 // 1-bit print preview: shows what the thermal head will produce.
 import type { DesignRaster } from '../printer/types';
 import { designSize, printableMm } from '../editor/geometry';
+import { formatNumber, t } from '../i18n';
+import { mediaName } from '../ui/media-text';
 
 export const THRESHOLD = 128;
 
-const de = (v: number) => v.toFixed(1).replace('.', ',');
+const mm1 = (v: number) => formatNumber(v, 1, 1);
 
 /** Luminance threshold to pure black/white. Returns new ImageData and the black dot count. */
 export function threshold(img: ImageData, t = THRESHOLD): { image: ImageData; black: number } {
@@ -43,8 +45,8 @@ export function showPreview(raster: DesignRaster, info: PreviewInfo): Promise<vo
   const meta = document.createElement('p');
   meta.className = 'muted';
   meta.textContent =
-    `${media.name}: ${w} x ${h} Punkte bei ${media.dpi} dpi (${de(mmW)} x ${de(size.heightMm)} mm)` +
-    (info.copies ? `, ${info.copies} Kopie(n)` : '') + `, ${black} schwarze Punkte`;
+    t('preview.meta', { media: mediaName(media), w, h, dpi: media.dpi, mmW: mm1(mmW), mmH: mm1(size.heightMm) }) +
+    (info.copies ? `, ${t('preview.copies', { count: info.copies })}` : '') + `, ${t('preview.black', { count: black })}`;
 
   const wrap = document.createElement('div');
   wrap.className = 'preview-wrap';
@@ -56,7 +58,7 @@ export function showPreview(raster: DesignRaster, info: PreviewInfo): Promise<vo
   cv.style.height = `${h * scale}px`;
   cv.getContext('2d')!.putImageData(image, 0, 0);
   cv.setAttribute('role', 'img');
-  cv.setAttribute('aria-label', 'Schwarz-Weiß-Vorschau des Drucks');
+  cv.setAttribute('aria-label', t('preview.canvasAria'));
   const frame = document.createElement('div');
   frame.className = 'preview-printable';
   const k = (media.dpi / 25.4) * scale;
@@ -68,10 +70,10 @@ export function showPreview(raster: DesignRaster, info: PreviewInfo): Promise<vo
   const legend = document.createElement('p');
   legend.className = 'muted small';
   legend.textContent = (info.note ? info.note + ' ' : '') +
-    'Rot gestrichelt: druckbarer Bereich. Alles ist auf Schwarz/Weiß reduziert (Schwellwert 50 %), so wie es der Thermodruckkopf ausgibt.';
+    t('preview.legend');
 
   const close = document.createElement('button');
-  close.textContent = 'Schließen';
+  close.textContent = t('common.close');
   close.className = 'primary';
   close.addEventListener('click', () => dlg.close());
   const actions = document.createElement('div');

@@ -4,7 +4,7 @@
 // Privacy: the USB serial number is never collected, and SERN:/SN: fields are removed from
 // IEEE 1284 Device ID strings. Calibration is stored per vendorId:productId for the same reason.
 
-import type { Calibration, Media, PrintTarget } from './types';
+import type { Calibration, Media, PrintTarget, PrinterStatusCode } from './types';
 import type { DeviceSpec } from './devices';
 
 export const REPORT_FORMAT = 'second-label-printer-report';
@@ -54,6 +54,7 @@ export interface StatusSnapshot {
   raw: number[];
   ready: boolean;
   message: string;
+  code?: PrinterStatusCode;
   at: string;
 }
 

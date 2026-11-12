@@ -10,6 +10,9 @@ All notable changes to Second Label. Versions follow [Semantic Versioning](https
 - Unknown printers of the same vendor still connect and can send a diagnostic report, printing and calibration are disabled with a message
 - Diagnostic report: new "Support status" field (verified, experimental, unknown)
 - Developer: `?mock=<pid>` (hex, e.g. `?mock=0020`) simulates a model from the table or an unknown one
+- The user interface is available in English and German. The language follows the browser (`navigator.languages`, English otherwise) and can be switched with EN / DE next to the version; the choice is remembered. Switching reloads the page and asks first when there are unsaved changes
+- Media names and notes, printer status and error messages, the calibration wizard and the diagnostics view are translated; numbers and dates follow the selected language (decimal comma in German). The diagnostic report and the GitHub issue text stay English
+- Developer: UI text lives in `src/i18n/locales/*.json` with a typed `t()` helper; driver and solver errors carry codes instead of German text. `bun test src` also runs a locale consistency test (CI updated)
 
 ## 0.3.0 (2026-11-11)
 

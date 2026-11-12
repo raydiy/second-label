@@ -107,6 +107,7 @@ function tape(
       widthMm: 0,
       heightMm: r2(band),
     },
+    minLengthMm,
     notes:
       `Continuous. Printable band ${r2(band)} mm (${Math.round((band / 25.4) * TAPE_DPI)} dots) centred on the tape. ` +
       `Minimum label length ${minLengthMm} mm cut to cut. Tape colour is set with ESC C (tape type).`,

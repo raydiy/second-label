@@ -12,12 +12,13 @@
 // The USB types below are structural subsets of the WebUSB API so this file compiles without
 // @types/w3c-web-usb and can be exercised in tests with a fake device.
 
-import type { Calibration, DesignRaster, PrintOptions, PrintTarget, PrinterDriver, PrinterStatus } from './types';
+import type { Calibration, DesignRaster, PrintOptions, PrintTarget, PrinterDriver, PrinterStatus, PrinterStatusCode } from './types';
 import { buildLabelJob, buildTapeJob, cmdStatus, decodeLabelStatus, decodeTapeStatus } from './commands';
 import { mmToDots, rasterize, type DitherMode } from './raster';
 import { deviceKey, loadCalibration } from './calibration';
 import { stripSerialFields, type DeviceIdEntry, type StatusSnapshot, type UsbDeviceSummary } from './diagnostics';
-import { DUO_128, DYMO_VENDOR_ID, NEUTRAL_CALIBRATION, findDevice, printBlockReason, type DeviceSpec } from './devices';
+import { DUO_128, DYMO_VENDOR_ID, NEUTRAL_CALIBRATION, findDevice, printBlocker, type DeviceSpec } from './devices';
+import { PrinterError } from './errors';
 
 export { DYMO_VENDOR_ID };
 
@@ -176,10 +177,10 @@ export class WebUsbPrinterDriver implements PrinterDriver {
   }
 
   async getStatus(target: PrintTarget): Promise<PrinterStatus> {
-    if (!this.device) return { connected: false, message: 'Not connected' };
+    if (!this.device) return { connected: false, message: 'Not connected', code: 'notConnected' };
     // Unknown model or missing engine: answer without sending anything to the device.
-    const blocked = printBlockReason(this.spec, target);
-    if (blocked) return { connected: true, ready: false, message: blocked };
+    const blocked = printBlocker(this.spec, target);
+    if (blocked) return { connected: true, ready: false, message: blocked.message, code: 'blocked' };
     return this.serialize(() => this.readStatus(target));
   }
 
@@ -287,8 +288,8 @@ export class WebUsbPrinterDriver implements PrinterDriver {
   async print(raster: DesignRaster, options: PrintOptions = {}): Promise<void> {
     const target = raster.media.target;
     this.requireDevice();
-    const blocked = printBlockReason(this.spec, target);
-    if (blocked) throw new Error(blocked);
+    const blocked = printBlocker(this.spec, target);
+    if (blocked) throw blocked;
     const bytes = buildJob(raster, options, {
       tapeType: this.opts.tapeType,
       dither: this.opts.dither,
@@ -297,7 +298,9 @@ export class WebUsbPrinterDriver implements PrinterDriver {
     });
     await this.serialize(async () => {
       const status = await this.readStatus(target);
-      if (!status.ready) throw new Error(`Printer not ready (${target}): ${status.message}`);
+      if (!status.ready) {
+        throw new PrinterError('notReady', `Printer not ready (${target}): ${status.message}`, { target, status: status.code ?? 'printerError' });
+      }
       const io = await this.engine(target);
       const device = this.requireDevice();
       for (let o = 0; o < bytes.length; o += this.opts.chunkSize) {
@@ -321,7 +324,7 @@ export class WebUsbPrinterDriver implements PrinterDriver {
   }
 
   private requireDevice(): UsbDeviceLike {
-    if (!this.device) throw new Error('Not connected');
+    if (!this.device) throw new PrinterError('notConnected', 'Not connected');
     return this.device;
   }
 
@@ -335,7 +338,7 @@ export class WebUsbPrinterDriver implements PrinterDriver {
   private async engine(target: PrintTarget): Promise<EngineIo> {
     const device = this.requireDevice();
     const spec = this.spec?.engines[target];
-    if (!spec) throw new Error(printBlockReason(this.spec, target) ?? `No ${target} engine`);
+    if (!spec) throw printBlocker(this.spec, target) ?? new Error(`No ${target} engine`);
     const n = spec.interfaceNumber;
     const iface = device.configuration?.interfaces.find((i) => i.interfaceNumber === n);
     if (!iface) throw new Error(`Interface ${n} (${target}) not found on ${this.spec!.name}.`);
@@ -368,6 +371,7 @@ export class WebUsbPrinterDriver implements PrinterDriver {
       raw: status.raw ? Array.from(status.raw) : [],
       ready: status.ready ?? false,
       message: status.message ?? '',
+      code: status.code,
       at: new Date().toISOString(),
     };
     return status;
@@ -380,10 +384,10 @@ export class WebUsbPrinterDriver implements PrinterDriver {
       await device.transferOut(io.outEp, asBufferSource(cmdStatus()));
       const r = await withTimeout(device.transferIn(io.inEp, io.inPacketSize), this.opts.statusTimeoutMs, 'status reply');
       const raw = r.data ? new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength).slice() : new Uint8Array();
-      if (raw.length === 0) return { connected: true, ready: false, raw, message: 'Empty status reply' };
+      if (raw.length === 0) return { connected: true, ready: false, raw, message: 'Empty status reply', code: 'emptyReply' };
       return target === 'label' ? labelStatus(raw) : tapeStatus(raw);
     } catch (e) {
-      return { connected: this.isConnected(), ready: false, message: (e as Error).message };
+      return { connected: this.isConnected(), ready: false, message: (e as Error).message, code: 'queryFailed' };
     }
   }
 }
@@ -399,8 +403,8 @@ export function buildJob(
 ): Uint8Array {
   const { media } = raster;
   const device = extra.device ?? DUO_128;
-  const blocked = printBlockReason(device, media.target);
-  if (blocked) throw new Error(blocked);
+  const blocked = printBlocker(device, media.target);
+  if (blocked) throw blocked;
   const engine = device.engines[media.target]!;
   if (media.dpi !== engine.dpi) throw new Error(`${media.name}: ${media.dpi} dpi, ${device.name} ${media.target} engine prints ${engine.dpi} dpi`);
   const bitmap = rasterize(raster, {
@@ -422,30 +426,33 @@ export function buildJob(
 
 export function labelStatus(raw: Uint8Array): PrinterStatus {
   const s = decodeLabelStatus(raw[0]);
-  const problem = s.paperOut ? 'Out of labels' : s.paperJam ? 'Paper jam' : s.error ? 'Printer error' : null;
-  return {
-    connected: true,
-    ready: s.ready && !problem,
-    paperOut: s.paperOut,
-    raw,
-    message: problem ?? (s.topOfForm ? 'Ready' : 'Ready (not at top of form)'),
-  };
+  const problem: [PrinterStatusCode, string] | null = s.paperOut
+    ? ['outOfLabels', 'Out of labels']
+    : s.paperJam
+      ? ['paperJam', 'Paper jam']
+      : s.error
+        ? ['printerError', 'Printer error']
+        : null;
+  const ok: [PrinterStatusCode, string] = s.topOfForm ? ['ready', 'Ready'] : ['readyNotTopOfForm', 'Ready (not at top of form)'];
+  const [code, message] = problem ?? ok;
+  return { connected: true, ready: s.ready && !problem, paperOut: s.paperOut, raw, message, code };
 }
 
 export function tapeStatus(raw: Uint8Array): PrinterStatus {
   const s = decodeTapeStatus(raw[0]);
-  const problem = !s.cassettePresent
-    ? 'No tape cassette'
+  const problem: [PrinterStatusCode, string] | null = !s.cassettePresent
+    ? ['noCassette', 'No tape cassette']
     : s.generalError
-      ? 'General error (motor stalled or tape jammed)'
+      ? ['generalError', 'General error (motor stalled or tape jammed)']
       : s.cutterJam
-        ? 'Cutter jammed'
+        ? ['cutterJam', 'Cutter jammed']
         : s.headOverheat
-          ? 'Print head overheated'
+          ? ['headOverheat', 'Print head overheated']
           : s.busy
-            ? 'Busy'
+            ? ['busy', 'Busy']
             : null;
-  return { connected: true, ready: !problem, paperOut: !s.cassettePresent, raw, message: problem ?? 'Ready' };
+  const [code, message] = problem ?? (['ready', 'Ready'] as [PrinterStatusCode, string]);
+  return { connected: true, ready: !problem, paperOut: !s.cassettePresent, raw, message, code };
 }
 
 /** TS 5.7+ types Uint8Array over ArrayBufferLike; ours are always plain ArrayBuffer backed. */

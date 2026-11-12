@@ -9,7 +9,9 @@
 import type { Calibration, DesignRaster, PrintOptions, PrintTarget, PrinterDriver, PrinterStatus } from '../printer/types';
 import { deviceKey, loadCalibration } from '../printer/calibration';
 import type { DeviceIdEntry, DiagnosticDriver, StatusSnapshot, UsbDeviceSummary } from '../printer/diagnostics';
-import { DUO_128, DYMO_VENDOR_ID, NEUTRAL_CALIBRATION, deviceTargets, findDevice, printBlockReason, type DeviceSpec } from '../printer/devices';
+import { DUO_128, DYMO_VENDOR_ID, NEUTRAL_CALIBRATION, deviceTargets, findDevice, printBlocker, type DeviceSpec } from '../printer/devices';
+import { PrinterError } from '../printer/errors';
+import { formatNumber, t } from '../i18n';
 import { showPreview } from './preview';
 
 const MOCK_VENDOR_ID = 0x0000;
@@ -41,11 +43,11 @@ export class MockDriver implements PrinterDriver, DiagnosticDriver {
   isConnected(): boolean { return this.connected; }
 
   async getStatus(target: PrintTarget): Promise<PrinterStatus> {
-    const blocked = this.connected ? printBlockReason(this.spec, target) : null;
-    if (blocked) return { connected: true, ready: false, message: blocked };
-    const status = { connected: this.connected, ready: this.connected, message: `Simulation (${target === 'tape' ? 'Band' : 'Etikett'})` };
+    const blocked = this.connected ? printBlocker(this.spec, target) : null;
+    if (blocked) return { connected: true, ready: false, message: blocked.message, code: 'blocked' };
+    const status: PrinterStatus = { connected: this.connected, ready: this.connected, message: `Simulation (${target})`, code: 'simulated' };
     if (this.connected) {
-      this.statusLog[target] = { raw: [target === 'tape' ? 0xc0 : 0x03], ready: true, message: status.message, at: new Date().toISOString() };
+      this.statusLog[target] = { raw: [target === 'tape' ? 0xc0 : 0x03], ready: true, message: status.message!, code: 'simulated', at: new Date().toISOString() };
     }
     return status;
   }
@@ -78,7 +80,7 @@ export class MockDriver implements PrinterDriver, DiagnosticDriver {
     return {
       vendorId: this.pid === null ? MOCK_VENDOR_ID : DYMO_VENDOR_ID,
       productId: this.pid ?? 0,
-      productName: `Simulierter Drucker${this.spec ? ` (${this.spec.name})` : ' (unbekanntes Modell)'}`,
+      productName: `Simulated printer${this.spec ? ` (${this.spec.name})` : ' (unknown model)'}`,
       manufacturerName: 'Second Label',
       usbVersion: '2.0',
       deviceVersion: '0.0.0',
@@ -91,7 +93,7 @@ export class MockDriver implements PrinterDriver, DiagnosticDriver {
   }
 
   async readDeviceIds(): Promise<DeviceIdEntry[]> {
-    if (!this.connected) throw new Error('Drucker ist nicht verbunden.');
+    if (!this.connected) throw new PrinterError('notConnected', 'Printer is not connected.');
     return (this.describeDevice()?.interfaces ?? []).map((i) => ({
       interface: i.number,
       value: `MFG:Second Label;MDL:${i.name};CLS:PRINTER;`,
@@ -103,17 +105,17 @@ export class MockDriver implements PrinterDriver, DiagnosticDriver {
   }
 
   async print(raster: DesignRaster, options: PrintOptions = {}): Promise<void> {
-    if (!this.connected) throw new Error('Drucker ist nicht verbunden.');
+    if (!this.connected) throw new PrinterError('notConnected', 'Printer is not connected.');
     const { image, media } = raster;
-    if (image.width < 1 || image.height < 1) throw new Error('Leeres Druckbild.');
-    const blocked = printBlockReason(this.spec, media.target);
-    if (blocked) throw new Error(blocked);
+    if (image.width < 1 || image.height < 1) throw new Error('Empty print image.');
+    const blocked = printBlocker(this.spec, media.target);
+    if (blocked) throw blocked;
     await this.getStatus(media.target);
     console.info('[MockDriver] print', { media: media.id, w: image.width, h: image.height, ...options, calibration: this.activeCalibration() });
     await showPreview(raster, {
-      title: 'Simulierter Druck',
+      title: t('mock.title'),
       copies: options.copies ?? 1,
-      note: `Kein Drucker angeschlossen (Simulation).${options.lengthMm ? ` Bandlänge ${options.lengthMm.toFixed(1).replace('.', ',')} mm.` : ''}`,
+      note: `${t('mock.note')}${options.lengthMm ? ` ${t('mock.tapeLength', { length: formatNumber(options.lengthMm, 1, 1) })}` : ''}`,
     });
   }
 }

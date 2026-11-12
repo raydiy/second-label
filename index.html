@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,103 +9,103 @@
   </head>
   <body>
     <header class="topbar">
-      <div class="brand">Second <span>Label</span> <small id="appVersion" class="version"></small></div>
-      <nav class="toolbar" aria-label="Werkzeuge">
-        <div class="group" role="group" aria-label="Datei">
-          <button data-cmd="new" data-icon="file-plus" title="Neues Layout">Neu</button>
-          <button data-cmd="save" data-icon="save" title="In der Bibliothek speichern (Strg+S)">Speichern</button>
-          <button data-cmd="saveAs" data-icon="save-all" title="Als neues Layout speichern">Kopie</button>
-          <button data-cmd="import" data-icon="upload" title="Layout-Datei oder Bibliotheks-Sicherung (.json) importieren">Import</button>
-          <button data-cmd="export" data-icon="download" title="Layout als .json exportieren">Export</button>
+      <div class="brand">Second <span>Label</span> <small id="appVersion" class="version"></small><span id="langSwitch" class="lang-switch" role="group" data-i18n-aria-label="lang.label"></span></div>
+      <nav class="toolbar" data-i18n-aria-label="toolbar.aria">
+        <div class="group" role="group" data-i18n-aria-label="toolbar.file">
+          <button data-cmd="new" data-icon="file-plus" data-i18n-title="toolbar.newTitle" data-i18n="toolbar.new"></button>
+          <button data-cmd="save" data-icon="save" data-i18n-title="toolbar.saveTitle" data-i18n="toolbar.save"></button>
+          <button data-cmd="saveAs" data-icon="save-all" data-i18n-title="toolbar.saveAsTitle" data-i18n="toolbar.saveAs"></button>
+          <button data-cmd="import" data-icon="upload" data-i18n-title="toolbar.importTitle" data-i18n="toolbar.import"></button>
+          <button data-cmd="export" data-icon="download" data-i18n-title="toolbar.exportTitle" data-i18n="toolbar.export"></button>
         </div>
-        <div class="group" role="group" aria-label="Bearbeiten">
-          <button data-cmd="undo" data-icon="undo-2" class="icon-only" title="Rückgängig (Strg+Z)" aria-label="Rückgängig"></button>
-          <button data-cmd="redo" data-icon="redo-2" class="icon-only" title="Wiederholen (Strg+Umschalt+Z)" aria-label="Wiederholen"></button>
+        <div class="group" role="group" data-i18n-aria-label="toolbar.edit">
+          <button data-cmd="undo" data-icon="undo-2" class="icon-only" data-i18n-title="toolbar.undoTitle" data-i18n-aria-label="toolbar.undo"></button>
+          <button data-cmd="redo" data-icon="redo-2" class="icon-only" data-i18n-title="toolbar.redoTitle" data-i18n-aria-label="toolbar.redo"></button>
         </div>
-        <div class="group" role="group" aria-label="Einfügen">
-          <button data-cmd="addText" data-icon="type" title="Text einfügen">Text</button>
-          <button data-cmd="addLine" data-icon="minus" class="icon-only" title="Linie einfügen" aria-label="Linie"></button>
-          <button data-cmd="addRect" data-icon="square" class="icon-only" title="Rechteck einfügen" aria-label="Rechteck"></button>
-          <button data-cmd="addEllipse" data-icon="circle" class="icon-only" title="Ellipse einfügen" aria-label="Ellipse"></button>
-          <button data-cmd="addImage" data-icon="image" title="Bild einfügen (PNG, JPG, SVG)">Bild</button>
-          <button data-cmd="addIcon" data-icon="shapes" title="Symbol einfügen">Symbol</button>
-          <button data-cmd="addBarcode" data-icon="barcode" title="Barcode oder QR-Code einfügen">Code</button>
+        <div class="group" role="group" data-i18n-aria-label="toolbar.insert">
+          <button data-cmd="addText" data-icon="type" data-i18n-title="toolbar.textTitle" data-i18n="toolbar.text"></button>
+          <button data-cmd="addLine" data-icon="minus" class="icon-only" data-i18n-title="toolbar.lineTitle" data-i18n-aria-label="toolbar.line"></button>
+          <button data-cmd="addRect" data-icon="square" class="icon-only" data-i18n-title="toolbar.rectTitle" data-i18n-aria-label="toolbar.rect"></button>
+          <button data-cmd="addEllipse" data-icon="circle" class="icon-only" data-i18n-title="toolbar.ellipseTitle" data-i18n-aria-label="toolbar.ellipse"></button>
+          <button data-cmd="addImage" data-icon="image" data-i18n-title="toolbar.imageTitle" data-i18n="toolbar.image"></button>
+          <button data-cmd="addIcon" data-icon="shapes" data-i18n-title="toolbar.iconTitle" data-i18n="toolbar.icon"></button>
+          <button data-cmd="addBarcode" data-icon="barcode" data-i18n-title="toolbar.codeTitle" data-i18n="toolbar.code"></button>
         </div>
-        <div class="group" role="group" aria-label="Zoom">
-          <button data-cmd="zoomOut" data-icon="zoom-out" class="icon-only" title="Verkleinern" aria-label="Verkleinern"></button>
-          <output id="zoomLabel" class="zoom-label">100 %</output>
-          <button data-cmd="zoomIn" data-icon="zoom-in" class="icon-only" title="Vergrößern" aria-label="Vergrößern"></button>
-          <button data-cmd="zoomFit" data-icon="scan" class="icon-only" title="Einpassen" aria-label="Einpassen"></button>
+        <div class="group" role="group" data-i18n-aria-label="toolbar.zoom">
+          <button data-cmd="zoomOut" data-icon="zoom-out" class="icon-only" data-i18n-title="toolbar.zoomOut" data-i18n-aria-label="toolbar.zoomOut"></button>
+          <output id="zoomLabel" class="zoom-label"></output>
+          <button data-cmd="zoomIn" data-icon="zoom-in" class="icon-only" data-i18n-title="toolbar.zoomIn" data-i18n-aria-label="toolbar.zoomIn"></button>
+          <button data-cmd="zoomFit" data-icon="scan" class="icon-only" data-i18n-title="toolbar.zoomFit" data-i18n-aria-label="toolbar.zoomFit"></button>
         </div>
       </nav>
-      <div class="printbar" role="group" aria-label="Drucker">
-        <span id="connStatus" class="status-pill" role="status">Nicht verbunden</span>
-        <button data-cmd="connect" id="connectBtn" data-icon="usb">Verbinden</button>
-        <button data-cmd="calibrate" data-icon="ruler" title="Drucker kalibrieren: Testmuster drucken, nachmessen, Werte speichern">Kalibrieren</button>
-        <button data-cmd="diagnostics" data-icon="stethoscope" class="icon-only" title="Druckerprofil / Diagnose" aria-label="Druckerprofil / Diagnose"></button>
-        <label class="copies" title="Anzahl Kopien">
-          <span>Kopien</span>
+      <div class="printbar" role="group" data-i18n-aria-label="printbar.aria">
+        <span id="connStatus" class="status-pill" role="status" data-i18n="conn.off"></span>
+        <button data-cmd="connect" id="connectBtn" data-icon="usb" data-i18n="printbar.connect"></button>
+        <button data-cmd="calibrate" data-icon="ruler" data-i18n-title="printbar.calibrateTitle" data-i18n="printbar.calibrate"></button>
+        <button data-cmd="diagnostics" data-icon="stethoscope" class="icon-only" data-i18n-title="printbar.diagnostics" data-i18n-aria-label="printbar.diagnostics"></button>
+        <label class="copies" data-i18n-title="printbar.copiesTitle">
+          <span data-i18n="printbar.copies"></span>
           <input id="copies" type="number" min="1" max="99" value="1" inputmode="numeric" />
         </label>
-        <button data-cmd="preview" data-icon="eye" title="1-Bit-Druckvorschau">Vorschau</button>
-        <button data-cmd="print" data-icon="printer" class="primary" title="Drucken (Strg+P)">Drucken</button>
+        <button data-cmd="preview" data-icon="eye" data-i18n-title="printbar.previewTitle" data-i18n="printbar.preview"></button>
+        <button data-cmd="print" data-icon="printer" class="primary" data-i18n-title="printbar.printTitle" data-i18n="printbar.print"></button>
       </div>
     </header>
 
     <div id="notices"></div>
 
     <main class="workspace">
-      <aside class="panel left" aria-label="Medium und Bibliothek">
+      <aside class="panel left" data-i18n-aria-label="panel.leftAria">
         <section>
-          <h2>Medium</h2>
-          <div class="segmented" role="radiogroup" aria-label="Druckwerk">
-            <label><input type="radio" name="engine" value="label" checked /> <span>Etikett</span></label>
-            <label><input type="radio" name="engine" value="tape" /> <span>Band</span></label>
+          <h2 data-i18n="panel.media"></h2>
+          <div class="segmented" role="radiogroup" data-i18n-aria-label="engine.aria">
+            <label><input type="radio" name="engine" value="label" checked /> <span data-i18n="engine.label"></span></label>
+            <label><input type="radio" name="engine" value="tape" /> <span data-i18n="engine.tape"></span></label>
           </div>
           <label class="field">
-            <span>Etikett / Band</span>
+            <span data-i18n="panel.mediaSelect"></span>
             <select id="mediaSelect"></select>
           </label>
           <div id="tapeOptions" hidden>
             <fieldset class="field">
-              <legend>Bandlänge</legend>
-              <label class="inline"><input type="radio" name="tapeMode" value="auto" checked /> automatisch</label>
-              <label class="inline"><input type="radio" name="tapeMode" value="fixed" /> fest</label>
+              <legend data-i18n="panel.tapeLength"></legend>
+              <label class="inline"><input type="radio" name="tapeMode" value="auto" checked /> <span data-i18n="panel.tapeAuto"></span></label>
+              <label class="inline"><input type="radio" name="tapeMode" value="fixed" /> <span data-i18n="panel.tapeFixed"></span></label>
               <label class="inline unit"><input id="tapeLength" type="number" min="15" max="1000" step="1" value="60" disabled /> mm</label>
             </fieldset>
           </div>
           <p id="mediaInfo" class="muted small"></p>
         </section>
         <section>
-          <h2>Layout</h2>
+          <h2 data-i18n="panel.layout"></h2>
           <label class="field">
-            <span>Name</span>
-            <input id="layoutName" type="text" value="Unbenannt" maxlength="120" />
+            <span data-i18n="panel.name"></span>
+            <input id="layoutName" type="text" value="" maxlength="120" />
           </label>
           <p id="saveState" class="muted small" role="status"></p>
         </section>
         <section class="library">
           <div class="library-head">
-            <h2>Bibliothek</h2>
-            <button id="libraryBackup" type="button" class="small" title="Alle Layouts als eine Sicherungsdatei herunterladen. Zum Wiederherstellen die Datei über „Import“ öffnen.">Alle sichern</button>
+            <h2 data-i18n="panel.library"></h2>
+            <button id="libraryBackup" type="button" class="small" data-i18n-title="panel.backupTitle" data-i18n="panel.backup"></button>
           </div>
-          <ul id="libraryList" class="library-list" aria-label="Gespeicherte Layouts"></ul>
+          <ul id="libraryList" class="library-list" data-i18n-aria-label="panel.libraryAria"></ul>
         </section>
       </aside>
 
-      <section class="stage" aria-label="Arbeitsfläche">
+      <section class="stage" data-i18n-aria-label="panel.stageAria">
         <div id="stageScroll" class="stage-scroll">
           <div id="labelFrame" class="label-frame">
-            <canvas id="editorCanvas" aria-label="Etiketten-Editor"></canvas>
+            <canvas id="editorCanvas" data-i18n-aria-label="panel.canvasAria"></canvas>
           </div>
         </div>
         <footer id="statusBar" class="statusbar" role="status"></footer>
       </section>
 
-      <aside class="panel right" aria-label="Eigenschaften">
-        <div class="bw-hint" title="Thermodruck kennt keine Farben">
+      <aside class="panel right" data-i18n-aria-label="panel.rightAria">
+        <div class="bw-hint" data-i18n-title="panel.bwTitle">
           <span class="swatch black"></span><span class="swatch white"></span>
-          <span>Thermodruck: nur Schwarz und Weiß. Farben und Graustufen werden beim Druck in Schwarz/Weiß umgewandelt.</span>
+          <span data-i18n="panel.bwHint"></span>
         </div>
         <div id="props"></div>
       </aside>

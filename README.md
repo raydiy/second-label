@@ -15,6 +15,7 @@ Working printers should not end up in the bin just because their official softwa
 - Snapping to the label centre, alignment tools, undo and redo
 - Saved layouts in your browser, plus export and import as `.label.json` files to share them
 - 1-bit print preview that shows exactly what the thermal head will print
+- User interface in English and German, chosen from the browser language (switch with EN / DE next to the version number)
 
 All data stays in your browser. Nothing is uploaded anywhere.
 
@@ -30,9 +31,9 @@ All data stays in your browser. Nothing is uploaded anywhere.
 | DYMO LabelWriter 400 | `0922:0019` | yes | no | experimental, untested |
 | DYMO LabelWriter 400 Turbo | `0922:001A` | yes | no | experimental, untested |
 
-"Experimental" means the model speaks the same protocol as the tested DUO according to the vendor technical reference and the open-source vendor driver, but nobody has printed with it in Second Label yet. These models start without any print offset correction: run "Kalibrieren" once before the first real print.
+"Experimental" means the model speaks the same protocol as the tested DUO according to the vendor technical reference and the open-source vendor driver, but nobody has printed with it in Second Label yet. These models start without any print offset correction: run "Calibrate" once before the first real print.
 
-Any other printer with the DYMO USB vendor ID can still connect. Printing and calibration are then disabled, but "Druckerprofil / Diagnose" works. If you own one of the experimental models, or another model, please send a report from "Druckerprofil / Diagnose" ("Auf GitHub melden"); that is how models move from experimental to tested. Background and the model list are in [docs/printer-families.md](docs/printer-families.md).
+Any other printer with the DYMO USB vendor ID can still connect. Printing and calibration are then disabled, but "Printer profile / diagnostics" works. If you own one of the experimental models, or another model, please send a report from "Printer profile / diagnostics" ("Report on GitHub"); that is how models move from experimental to tested. Background and the model list are in [docs/printer-families.md](docs/printer-families.md).
 
 ## Requirements
 
@@ -52,11 +53,21 @@ Requires [Bun](https://bun.sh).
 ```sh
 bun install
 bun run dev        # http://localhost:5173
-bun test src/printer
+bun test src
 bun run build      # static site in dist/
 ```
 
 The printer protocol, sources and calibration notes are documented in [docs/protocol.md](docs/protocol.md).
+
+### Translations
+
+All UI text lives in `src/i18n/locales/` (`en.json` is the reference and fallback, `de.json` the German translation); nothing user-visible is hard-coded. To add a language:
+
+1. Copy `src/i18n/locales/en.json` to `<code>.json` (for example `fr.json`) and translate the values. Keep the keys and the `{placeholders}`; plural entries have a `one` and an `other` form.
+2. Import the file in `src/i18n/index.ts` and add it to `LOCALES` (the detection list). The browser language picks it automatically, and the switch next to the version shows it.
+3. Run `bun test src`: the locale test checks that every file has the same keys, no empty values and the same placeholders as `en.json`.
+
+The diagnostic report and the prefilled GitHub issue stay in English on purpose, they go to the maintainer.
 
 The printer driver is an independent implementation written for this project. No vendor drivers, PPD files or vendor source code are included. Command bytes and media dimensions were taken from the publicly available vendor technical reference and cross-checked against the open-source `dymo-cups-drivers` project (GPL-2.0), which served only as a protocol reference. The `spike/` folder contains standalone scripts for status queries and supervised test prints.
 

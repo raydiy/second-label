@@ -6,7 +6,7 @@ import { preloadBundledFonts } from './editor/fonts';
 import { designSize, isContinuous, mmToDots, printableMm } from './editor/geometry';
 import { renderRaster, renderThumbnail } from './editor/render';
 import type { Media, PrintTarget } from './printer/types';
-import { UNSUPPORTED_MESSAGE, printBlockReason } from './printer/devices';
+import { printBlocker } from './printer/devices';
 import { mediaForDevice } from './printer/media';
 import { getLayout, importLayouts, listLayouts, newId, putLayout, requestPersistentStorage } from './storage/db';
 import { LAYOUT_FORMAT, LAYOUT_VERSION, downloadLayout, downloadLibrary, readImportFile, type LayoutFile } from './storage/layout-file';
@@ -17,6 +17,9 @@ import { $, decorateIcons, h, num, toast } from './ui/dom';
 import { renderLibrary, type LibraryActions } from './ui/library';
 import { renderProperties } from './ui/properties';
 import { APP_BUILD_DATE, APP_COMMIT, APP_VERSION } from './build-info';
+import { LOCALES, formatPercent, getLocale, setLocale, t, translateDom, type Locale } from './i18n';
+import { LocalizedError, errorText } from './i18n/errors';
+import { engineName, mediaName, mediaNote } from './ui/media-text';
 
 // ---------- state ----------
 
@@ -57,7 +60,10 @@ const els = {
 
 // ---------- boot ----------
 
+translateDom();
 decorateIcons();
+renderLanguageSwitch();
+els.name.value = t('layout.untitled');
 await preloadBundledFonts();
 
 const initialMedia = mediaById(store.get('dymo.mediaId') ?? '') ?? MEDIA[0];
@@ -66,7 +72,7 @@ const editor = new LabelEditor(els.canvas, initialMedia);
 const versionEl = document.querySelector<HTMLElement>('#appVersion');
 if (versionEl) {
   versionEl.textContent = `v${APP_VERSION}`;
-  versionEl.title = `Version ${APP_VERSION} · Commit ${APP_COMMIT} · Build ${APP_BUILD_DATE}`;
+  versionEl.title = t('app.versionTitle', { version: APP_VERSION, commit: APP_COMMIT, date: APP_BUILD_DATE });
 }
 
 // Clicking the dark stage around the label leaves text editing and clears the selection.
@@ -89,7 +95,7 @@ function setEngineRadio(t: PrintTarget) {
 
 function fillMediaSelect(target: PrintTarget, selectedId?: string) {
   const list = available.filter((m) => m.target === target);
-  els.mediaSelect.replaceChildren(...list.map((m) => h('option', { value: m.id }, m.name)));
+  els.mediaSelect.replaceChildren(...list.map((m) => h('option', { value: m.id }, mediaName(m))));
   els.mediaSelect.value = selectedId && list.some((m) => m.id === selectedId) ? selectedId : list[0]?.id ?? '';
   els.tapeOptions.hidden = target !== 'tape';
 }
@@ -130,22 +136,26 @@ function syncTapeControls() {
 
 function syncFrame() {
   els.frame.classList.toggle('tape', isContinuous(editor.media));
-  els.zoom.textContent = `${Math.round((editor.zoom / (96 / 72)) * 100)} %`;
+  els.zoom.textContent = formatPercent(Math.round((editor.zoom / (96 / 72)) * 100) / 100);
 }
 
 function updateStatus() {
   const m = editor.media;
   const s = designSize(m, editor.tapeLengthMm);
   const p = printableMm(m, s);
-  const dots = `${mmToDots(s.widthMm, m.dpi)} x ${mmToDots(s.heightMm, m.dpi)} Punkte`;
+  const size = { w: num(s.widthMm), h: num(s.heightMm) };
   els.status.replaceChildren(
-    h('span', {}, m.name),
-    h('span', {}, `${num(s.widthMm)} x ${num(s.heightMm)} mm${isContinuous(m) ? (editor.tapeMode === 'auto' ? ' (Länge automatisch)' : ' (Länge fest)') : ''}`),
-    h('span', {}, `${dots} bei ${m.dpi} dpi`),
-    h('span', {}, `Druckbar ${num(p.w)} x ${num(p.h)} mm`),
-    h('span', {}, `${editor.canvas.getObjects().length} Objekte`),
+    h('span', {}, mediaName(m)),
+    h('span', {}, t(!isContinuous(m) ? 'status.size' : editor.tapeMode === 'auto' ? 'status.sizeAuto' : 'status.sizeFixed', size)),
+    h('span', {}, t('status.dots', { w: mmToDots(s.widthMm, m.dpi), h: mmToDots(s.heightMm, m.dpi), dpi: m.dpi })),
+    h('span', {}, t('status.printable', { w: num(p.w), h: num(p.h) })),
+    h('span', {}, t('status.objects', { count: editor.canvas.getObjects().length })),
   );
-  els.mediaInfo.textContent = `${m.target === 'tape' ? 'Band' : 'Etikett'} ${m.widthMm} mm breit${m.lengthMm ? `, ${m.lengthMm} mm lang` : ', endlos'}${m.sku ? `, Art.-Nr. ${m.sku}` : ''}. ${m.notes ? m.notes + '. ' : ''}Rot schraffiert: nicht bedruckbarer Rand.`;
+  const dims = m.lengthMm
+    ? t('mediaInfo.sizeFixed', { engine: engineName(m.target), width: m.widthMm, length: m.lengthMm })
+    : t('mediaInfo.sizeContinuous', { engine: engineName(m.target), width: m.widthMm });
+  const note = mediaNote(m);
+  els.mediaInfo.textContent = `${dims}${m.sku ? `, ${t('mediaInfo.sku', { sku: m.sku })}` : ''}. ${note ? `${note} ` : ''}${t('mediaInfo.margin')}`;
   syncFrame();
 }
 
@@ -167,16 +177,16 @@ function updateUndoButtons() {
 function setDirty(d: boolean) {
   dirty = d;
   els.saveState.textContent = currentId
-    ? (d ? 'Ungespeicherte Änderungen' : 'Gespeichert')
-    : (editor.isEmpty() ? 'Neues Layout' : 'Noch nicht gespeichert');
-  document.title = `${d ? '* ' : ''}${els.name.value || 'Unbenannt'} · Second Label`;
+    ? t(d ? 'layout.unsaved' : 'layout.saved')
+    : t(editor.isEmpty() ? 'layout.new' : 'layout.notSaved');
+  document.title = `${d ? '* ' : ''}${els.name.value || t('layout.untitled')} · Second Label`;
   const unsaved = currentId ? d : !editor.isEmpty();
   document.querySelector('[data-cmd="save"]')?.classList.toggle('unsaved', unsaved);
 }
 els.name.addEventListener('input', () => setDirty(true));
 
 function confirmDiscard(): boolean {
-  return !dirty || editor.isEmpty() || confirm('Ungespeicherte Änderungen verwerfen?');
+  return !dirty || editor.isEmpty() || confirm(t('layout.confirmDiscard'));
 }
 
 // ---------- layouts ----------
@@ -187,7 +197,7 @@ function currentLayout(): LayoutFile {
   return {
     format: LAYOUT_FORMAT,
     version: LAYOUT_VERSION,
-    name: els.name.value.trim() || 'Unbenannt',
+    name: els.name.value.trim() || t('layout.untitled'),
     mediaId: m.id,
     mediaInfo: { name: m.name, target: m.target, widthMm: m.widthMm, lengthMm: m.lengthMm },
     tape: isContinuous(m) ? { mode: editor.tapeMode, lengthMm: editor.tapeMode === 'fixed' ? editor.tapeFixedMm : editor.tapeLengthMm } : undefined,
@@ -201,26 +211,26 @@ async function saveLayout(asNew: boolean) {
   try {
     const l = currentLayout();
     const id = asNew || !currentId ? newId() : currentId;
-    if (asNew) { l.name = currentId ? `${l.name} (Kopie)` : l.name; l.createdAt = l.updatedAt; }
+    if (asNew) { l.name = currentId ? t('layout.copyName', { name: l.name }) : l.name; l.createdAt = l.updatedAt; }
     const thumbnail = await renderThumbnail(l.design, editor.media, editor.tapeLengthMm);
     await putLayout({ ...l, id, thumbnail });
     currentId = id;
     createdAt = l.createdAt;
     els.name.value = l.name;
     setDirty(false);
-    toast(`„${l.name}“ gespeichert.`, 'ok');
+    toast(t('toast.saved', { name: l.name }), 'ok');
     refreshLibrary();
   } catch (e) {
-    toast(`Speichern fehlgeschlagen: ${(e as Error).message}`, 'error');
+    toast(t('toast.saveFailed', { error: errorText(e) }), 'error');
   }
 }
 
 async function openLayout(l: LayoutFile, id: string | null) {
   let media = mediaById(l.mediaId);
   if (!media) {
-    const t = (l.mediaInfo?.target as PrintTarget) ?? 'label';
-    media = available.find((m) => m.target === t) ?? available[0];
-    toast(`Medium „${l.mediaInfo?.name ?? l.mediaId}“ ist hier unbekannt, verwende „${media.name}“.`, 'error');
+    const target = (l.mediaInfo?.target as PrintTarget) ?? 'label';
+    media = available.find((m) => m.target === target) ?? available[0];
+    toast(t('toast.mediaUnknown', { media: l.mediaInfo?.name ?? l.mediaId, fallback: mediaName(media) }), 'error');
   }
   if (l.tape) { editor.tapeMode = l.tape.mode; editor.tapeFixedMm = l.tape.lengthMm; }
   setEngineRadio(media.target);
@@ -231,7 +241,7 @@ async function openLayout(l: LayoutFile, id: string | null) {
   try {
     await editor.loadDesign(l.design);
   } catch (e) {
-    toast(`Layout konnte nicht geladen werden: ${(e as Error).message}`, 'error');
+    toast(t('toast.loadFailed', { error: errorText(e) }), 'error');
     return;
   }
   currentId = id;
@@ -245,7 +255,7 @@ async function openLayout(l: LayoutFile, id: string | null) {
 const libraryActions: LibraryActions = {
   open: (l) => { if (confirmDiscard()) openLayout(l, l.id); },
   rename: async (l) => {
-    const name = prompt('Neuer Name:', l.name)?.trim();
+    const name = prompt(t('layout.renamePrompt'), l.name)?.trim();
     if (!name) return;
     const fresh = (await getLayout(l.id)) ?? l;
     await putLayout({ ...fresh, name, updatedAt: new Date().toISOString() });
@@ -254,8 +264,8 @@ const libraryActions: LibraryActions = {
   },
   duplicate: async (l) => {
     const now = new Date().toISOString();
-    await putLayout({ ...l, id: newId(), name: `${l.name} (Kopie)`, createdAt: now, updatedAt: now });
-    toast('Layout dupliziert.', 'ok');
+    await putLayout({ ...l, id: newId(), name: t('layout.copyName', { name: l.name }), createdAt: now, updatedAt: now });
+    toast(t('toast.duplicated'), 'ok');
     refreshLibrary();
   },
   exportFile: (l) => downloadLayout(l),
@@ -270,11 +280,11 @@ function refreshLibrary() {
 document.querySelector('#libraryBackup')?.addEventListener('click', async () => {
   try {
     const all = await listLayouts();
-    if (!all.length) { toast('Die Bibliothek ist leer, es gibt nichts zu sichern.', 'info'); return; }
+    if (!all.length) { toast(t('toast.libraryEmpty'), 'info'); return; }
     downloadLibrary(all);
-    toast(`${all.length} Layouts gesichert.`, 'ok');
+    toast(t('toast.backedUp', { count: all.length }), 'ok');
   } catch (e) {
-    toast(`Sicherung fehlgeschlagen: ${(e as Error).message}`, 'error');
+    toast(t('toast.backupFailed', { error: errorText(e) }), 'error');
   }
 });
 
@@ -289,16 +299,16 @@ els.fileImport.addEventListener('change', async () => {
     if (r.kind === 'library') {
       const { added, updated, skipped } = await importLayouts(r.layouts);
       refreshLibrary();
-      toast(`Sicherung eingelesen: ${added} neu, ${updated} aktualisiert, ${skipped} unverändert.`, 'ok');
+      toast(t('toast.backupImported', { added, updated, skipped }), 'ok');
       return;
     }
     const l = r.layout;
     if (!confirmDiscard()) return;
     await openLayout(l, null);
     setDirty(true);
-    toast(`„${l.name}“ importiert. Mit „Speichern“ in die Bibliothek übernehmen.`, 'ok');
+    toast(t('toast.layoutImported', { name: l.name }), 'ok');
   } catch (e) {
-    toast(`Import fehlgeschlagen: ${(e as Error).message}`, 'error');
+    toast(t('toast.importFailed', { error: errorText(e) }), 'error');
   }
 });
 
@@ -307,20 +317,20 @@ els.fileImage.addEventListener('change', async () => {
   els.fileImage.value = '';
   if (!f) return;
   try {
-    if (f.size > 8 * 1024 * 1024) throw new Error('Bild ist größer als 8 MB.');
+    if (f.size > 8 * 1024 * 1024) throw new LocalizedError('error.imageTooLarge');
     if (f.type === 'image/svg+xml' || f.name.toLowerCase().endsWith('.svg')) {
       await editor.addSvg(await f.text(), 'svg', f.name);
     } else {
       const url = await new Promise<string>((res, rej) => {
         const r = new FileReader();
         r.onload = () => res(String(r.result));
-        r.onerror = () => rej(new Error('Datei konnte nicht gelesen werden.'));
+        r.onerror = () => rej(new LocalizedError('error.fileRead'));
         r.readAsDataURL(f);
       });
       await editor.addImage(url, f.name);
     }
   } catch (e) {
-    toast(`Bild konnte nicht eingefügt werden: ${(e as Error).message}`, 'error');
+    toast(t('toast.imageFailed', { error: errorText(e) }), 'error');
   }
 });
 
@@ -328,11 +338,9 @@ els.fileImage.addEventListener('change', async () => {
 
 function showBrowserNotices() {
   const notes: string[] = [];
-  if (!window.isSecureContext) notes.push('Diese Seite läuft nicht über HTTPS. WebUSB funktioniert nur in einem sicheren Kontext (https:// oder localhost).');
-  if (!('usb' in navigator)) {
-    notes.push('Dieser Browser unterstützt kein WebUSB (z. B. Safari oder Firefox). Zum Drucken bitte Chrome, Edge, Vivaldi oder Brave verwenden. Gestalten, Speichern und die Vorschau funktionieren trotzdem.');
-  }
-  if (driver.simulated) notes.push('Simulationsmodus (?mock): Es wird kein echter Drucker angesprochen, „Drucken“ zeigt das Druckbild an.');
+  if (!window.isSecureContext) notes.push(t('notice.insecure'));
+  if (!('usb' in navigator)) notes.push(t('notice.noWebUsb'));
+  if (driver.simulated) notes.push(t('notice.mock'));
   const device = deviceNotice();
   if (device) notes.push(device);
   els.notices.replaceChildren(...notes.map((n) => h('div', { class: 'notice', role: 'note' }, n)));
@@ -344,11 +352,13 @@ function deviceNotice(): string | null {
   const spec = driver.deviceSpec();
   if (!spec) {
     const d = driver.describeDevice();
-    return `Verbunden: ${d?.productName ?? 'unbekanntes Gerät'} (${driver.deviceKey() ?? '?'}). ${UNSUPPORTED_MESSAGE} Drucken und Kalibrieren sind für dieses Gerät gesperrt.`;
+    return t('notice.unknownDevice', {
+      device: d?.productName ?? t('common.unknownDevice'),
+      key: driver.deviceKey() ?? '?',
+      reason: t('printerError.unsupportedModel'),
+    });
   }
-  if (spec.status === 'experimental') {
-    return `Verbunden: ${spec.name}. Dieses Modell ist noch nicht getestet. Bitte vor dem ersten Druck über „Kalibrieren“ einmessen und über „Druckerprofil / Diagnose“ melden, ob es funktioniert.`;
-  }
+  if (spec.status === 'experimental') return t('notice.experimental', { model: spec.name });
   return null;
 }
 
@@ -360,14 +370,15 @@ function applyDevice() {
   document.querySelectorAll<HTMLInputElement>('input[name=engine]').forEach((r) => {
     const off = !targets.has(r.value as PrintTarget);
     r.disabled = off;
-    r.closest('label')!.title = off ? `${spec?.name ?? 'Dieser Drucker'} hat kein ${r.value === 'tape' ? 'Band' : 'Etiketten'}druckwerk.` : '';
+    const printer = spec?.name ?? t('engine.thisPrinter');
+    r.closest('label')!.title = off ? t(r.value === 'tape' ? 'engine.noTape' : 'engine.noLabel', { printer }) : '';
   });
   const cur = editor.media;
   const match = available.find((m) => m.id === cur.id);
   if (!match) {
     const next = available.find((m) => m.target === cur.target) ?? available[0];
     applyMedia(next);
-    toast(`„${cur.name}“ passt nicht zum ${spec?.name ?? 'Drucker'}, Medium auf „${next.name}“ umgestellt.`, 'info');
+    toast(t('toast.mediaSwitched', { media: mediaName(cur), printer: spec?.name ?? t('common.printer'), next: mediaName(next) }), 'info');
   } else if (JSON.stringify(match) !== JSON.stringify(cur)) {
     applyMedia(match); // same medium, different geometry (e.g. a narrower tape head)
   }
@@ -376,21 +387,10 @@ function applyDevice() {
   showBrowserNotices();
 }
 
-function usbErrorText(e: unknown): string {
-  const err = e as DOMException & Error;
-  switch (err?.name) {
-    case 'NotFoundError': return 'Kein Drucker ausgewählt (oder kein passendes Gerät gefunden).';
-    case 'SecurityError': return 'Zugriff auf USB nicht erlaubt. Bitte die Seite über HTTPS öffnen und den Zugriff zulassen.';
-    case 'NetworkError': return 'Die Verbindung zum Drucker ist abgebrochen. Kabel prüfen und neu verbinden.';
-    case 'InvalidStateError': return 'Der Drucker ist belegt. Andere Programme (z. B. die Herstellersoftware) schließen und erneut versuchen.';
-    default: return err?.message || String(e);
-  }
-}
-
 function setConn(state: 'off' | 'on' | 'err', text?: string) {
   els.conn.className = `status-pill${state === 'on' ? ' on' : state === 'err' ? ' err' : ''}`;
-  els.conn.textContent = text ?? (state === 'on' ? (driver.simulated ? 'Verbunden (Simulation)' : 'Verbunden') : 'Nicht verbunden');
-  els.connectBtn.lastChild!.textContent = state === 'on' ? 'Trennen' : 'Verbinden';
+  els.conn.textContent = text ?? (state === 'on' ? t(driver.simulated ? 'conn.onSimulated' : 'conn.on') : t('conn.off'));
+  els.connectBtn.lastChild!.textContent = t(state === 'on' ? 'printbar.disconnect' : 'printbar.connect');
   els.connectBtn.dataset.cmd = state === 'on' ? 'disconnect' : 'connect';
   applyDevice();
 }
@@ -400,22 +400,22 @@ async function initConnection() {
   try {
     if (await driver.reconnect()) setConn('on');
   } catch { /* silent, user can connect manually */ }
-  navigator.usb?.addEventListener('disconnect', () => { if (!driver.isConnected()) setConn('off', 'Getrennt'); });
+  navigator.usb?.addEventListener('disconnect', () => { if (!driver.isConnected()) setConn('off', t('conn.disconnected')); });
 }
 
 async function connect() {
   if (!('usb' in navigator) && !driver.simulated) {
-    toast('WebUSB wird von diesem Browser nicht unterstützt. Bitte Chrome, Edge, Vivaldi oder Brave verwenden.', 'error');
+    toast(t('toast.noWebUsb'), 'error');
     return;
   }
   try {
-    setConn('off', 'Verbinde ...');
+    setConn('off', t('conn.connecting'));
     await driver.connect();
     setConn('on');
-    toast('Drucker verbunden.', 'ok');
+    toast(t('toast.connected'), 'ok');
   } catch (e) {
-    setConn('err', 'Fehler');
-    toast(`Verbindung fehlgeschlagen: ${usbErrorText(e)}`, 'error');
+    setConn('err', t('conn.error'));
+    toast(t('toast.connectFailed', { error: errorText(e) }), 'error');
   }
 }
 
@@ -431,32 +431,32 @@ function copies(): number {
 async function preview() {
   try {
     const raster = await renderRaster(editor.getDesignJSON(), editor.media, editor.tapeLengthMm);
-    await showPreview(raster, { title: 'Druckvorschau', copies: copies() });
+    await showPreview(raster, { title: t('preview.title'), copies: copies() });
   } catch (e) {
-    toast(`Vorschau fehlgeschlagen: ${(e as Error).message}`, 'error');
+    toast(t('toast.previewFailed', { error: errorText(e) }), 'error');
   }
 }
 
 async function print() {
-  if (editor.isEmpty()) { toast('Das Etikett ist leer.', 'error'); return; }
+  if (editor.isEmpty()) { toast(t('toast.emptyLabel'), 'error'); return; }
   if (!driver.isConnected()) {
     const ok = await driver.reconnect().catch(() => false);
-    if (!ok) { toast('Kein Drucker verbunden. Bitte zuerst „Verbinden“ klicken.', 'error'); return; }
+    if (!ok) { toast(t('toast.notConnected'), 'error'); return; }
     setConn('on');
   }
   const btn = $<HTMLButtonElement>('[data-cmd=print]');
   btn.disabled = true;
   try {
     const media = editor.media;
-    const blocked = printBlockReason(driver.deviceSpec(), media.target);
-    if (blocked) throw new Error(blocked);
+    const blocked = printBlocker(driver.deviceSpec(), media.target);
+    if (blocked) throw blocked;
     const status = await driver.getStatus(media.target).catch(() => null);
-    if (status?.paperOut) throw new Error(media.target === 'tape' ? 'Kein Band eingelegt oder Band leer.' : 'Keine Etiketten eingelegt oder Rolle leer.');
+    if (status?.paperOut) throw new LocalizedError(media.target === 'tape' ? 'error.noTape' : 'error.noLabels');
     const raster = await renderRaster(editor.getDesignJSON(), media, editor.tapeLengthMm);
     await driver.print(raster, { copies: copies(), lengthMm: isContinuous(media) ? editor.tapeLengthMm : undefined });
-    toast(driver.simulated ? 'Simulierter Druck abgeschlossen.' : 'Druckauftrag gesendet.', 'ok');
+    toast(t(driver.simulated ? 'toast.printSimulated' : 'toast.printSent'), 'ok');
   } catch (e) {
-    toast(`Drucken fehlgeschlagen: ${usbErrorText(e)}`, 'error');
+    toast(t('toast.printFailed', { error: errorText(e) }), 'error');
     if (!driver.isConnected()) setConn('off');
   } finally {
     btn.disabled = false;
@@ -471,7 +471,7 @@ const commands: Record<string, () => unknown> = {
     await editor.loadDesign(null);
     currentId = null;
     createdAt = null;
-    els.name.value = 'Unbenannt';
+    els.name.value = t('layout.untitled');
     setDirty(false);
     refreshLibrary();
   },
@@ -481,7 +481,7 @@ const commands: Record<string, () => unknown> = {
   export: () => downloadLayout(currentLayout()),
   undo: () => editor.undo(),
   redo: () => editor.redo(),
-  addText: () => editor.addText(),
+  addText: () => editor.addText(t('editor.newText')),
   addLine: () => editor.addLine(),
   addRect: () => editor.addRect(),
   addEllipse: () => editor.addEllipse(),
@@ -491,13 +491,13 @@ const commands: Record<string, () => unknown> = {
       const icon = await pickIcon();
       if (icon) await editor.addSvg(icon.svg, 'icon', icon.name);
     } catch (e) {
-      toast(`Symbol konnte nicht eingefügt werden: ${(e as Error).message}`, 'error');
+      toast(t('toast.iconFailed', { error: errorText(e) }), 'error');
     }
   },
   addBarcode: async () => {
     const r = await askBarcode();
     if (!r) return;
-    try { await editor.addBarcode(r.bcid, r.data); } catch (e) { toast((e as Error).message, 'error'); }
+    try { await editor.addBarcode(r.bcid, r.data); } catch (e) { toast(errorText(e), 'error'); }
   },
   zoomIn: () => { editor.setZoom(editor.zoom * 1.25); syncFrame(); },
   zoomOut: () => { editor.setZoom(editor.zoom / 1.25); syncFrame(); },
@@ -507,23 +507,23 @@ const commands: Record<string, () => unknown> = {
   preview,
   print,
   calibrate: () => {
-    if (driver.isConnected() && !driver.deviceSpec()) { toast(UNSUPPORTED_MESSAGE, 'error'); return; }
+    if (driver.isConnected() && !driver.deviceSpec()) { toast(t('printerError.unsupportedModel'), 'error'); return; }
     return openCalibrationWizard({
       driver,
       media: () => available,
       currentMedia: editor.media,
       connect: async () => { await connect(); return driver.isConnected(); },
-      errorText: usbErrorText,
+      errorText,
     });
   },
-  diagnostics: () => openDiagnostics({ driver, media: editor.media, errorText: usbErrorText }),
+  diagnostics: () => openDiagnostics({ driver, media: editor.media, errorText }),
 };
 
 document.addEventListener('click', (e) => {
   const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-cmd]');
   if (!btn || (btn as HTMLButtonElement).disabled) return;
   const fn = commands[btn.dataset.cmd!];
-  if (fn) Promise.resolve(fn()).catch((err) => toast(String((err as Error).message ?? err), 'error'));
+  if (fn) Promise.resolve(fn()).catch((err) => toast(errorText(err), 'error'));
 });
 
 document.addEventListener('keydown', (e) => {
@@ -542,9 +542,35 @@ document.addEventListener('keydown', (e) => {
   if (arrows[e.key] && editor.active()) { e.preventDefault(); editor.nudge(...arrows[e.key]); }
 });
 
+let reloading = false;
 window.addEventListener('beforeunload', (e) => {
-  if (dirty && !editor.isEmpty()) e.preventDefault();
+  if (!reloading && dirty && !editor.isEmpty()) e.preventDefault();
 });
+
+// ---------- language ----------
+
+/** DE / EN switch next to the version. Switching reloads the page (asks first if work is unsaved). */
+function renderLanguageSwitch() {
+  const box = document.querySelector('#langSwitch');
+  if (!box) return;
+  const active = getLocale();
+  box.replaceChildren(...(Object.keys(LOCALES) as Locale[]).map((l) => h('button', {
+    type: 'button',
+    lang: l,
+    title: LOCALES[l].name,
+    'aria-label': LOCALES[l].name,
+    'aria-pressed': String(l === active),
+    onclick: () => switchLanguage(l),
+  }, l.toUpperCase())));
+}
+
+function switchLanguage(l: Locale) {
+  if (l === getLocale()) return;
+  if (dirty && !editor.isEmpty() && !confirm(t('lang.confirmReload'))) return;
+  setLocale(l);
+  reloading = true;
+  location.reload();
+}
 
 let resizeTimer = 0;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = window.setTimeout(zoomFit, 150); });
