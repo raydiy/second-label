@@ -2,9 +2,13 @@
 
 All notable changes to Second Label. Versions follow [Semantic Versioning](https://semver.org): new features raise the middle number, fixes the last one.
 
+## 0.5.1 (2026-11-12)
+
+- Label name 2112284 shortened to "2112284 Barcode 19 x 64 mm"
+
 ## 0.5.0 (2026-11-12)
 
-- New label medium: 2112284 Barcode (film) 19 x 64 mm. Margins taken from 11355, which has the same width
+- New label medium: 2112284 Barcode 19 x 64 mm. Margins taken from 11355, which has the same width
 
 ## 0.4.0 (2026-11-12)
 

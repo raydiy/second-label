@@ -150,7 +150,7 @@ export const MEDIA: Media[] = [
     { page: [167, 539], area: [4.08, 4.32, 163.68, 522.72] },
     'Wider than the 56.9 mm head: the top 2.1 mm of the design cannot be printed.'),
   // No PPD entry known: page is the nominal 19 x 64 mm (54 x 181 pt), margins copied from 11355 (same 19 mm width).
-  label('lw-2112284', '2112284 Barcode (film) 19 x 64 mm', '2112284', 19, 64,
+  label('lw-2112284', '2112284 Barcode 19 x 64 mm', '2112284', 19, 64,
     { page: [54, 181], area: [4.08, 4.32, 51.12, 164.68] }),
   label('lw-s0929100', 'Appointment / Name Badge Card 51 x 89 mm', 'S0929100 / 30374', 51, 89,
     { page: [144, 252], area: [8.64, 4.32, 141.12, 225.12] },
