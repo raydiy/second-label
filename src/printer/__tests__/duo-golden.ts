@@ -30,6 +30,9 @@ const custom: Calibration = {
   tape: { centerCorrectionDots: { 6: 1, 9: -2, 12: 3, 19: -4, 24: 2 } },
 };
 
+/** Media ids added after v0.3.0; not part of the golden byte-identity set. */
+const ADDED_AFTER_V030 = new Set(['lw-2112284']);
+
 const dots = (mm: number, dpi: number) => Math.round((mm / 25.4) * dpi);
 
 export interface GoldenCase {
@@ -41,7 +44,8 @@ export interface GoldenCase {
 export function goldenCases(device?: DeviceSpec): GoldenCase[] {
   const cases: GoldenCase[] = [];
   const dev = device ? { device } : {};
-  for (const m of MEDIA) {
+  // Fixed to the media of v0.3.0, so media added later do not change the golden set.
+  for (const m of MEDIA.filter((x) => !ADDED_AFTER_V030.has(x.id))) {
     const len = m.lengthMm === null ? patternLengthMm(m) : undefined;
     const opts: PrintOptions = { copies: 1, lengthMm: len };
     cases.push({

@@ -2,6 +2,10 @@
 
 All notable changes to Second Label. Versions follow [Semantic Versioning](https://semver.org): new features raise the middle number, fixes the last one.
 
+## 0.5.0 (2026-11-12)
+
+- New label medium: 2112284 Barcode (film) 19 x 64 mm. Margins taken from 11355, which has the same width
+
 ## 0.4.0 (2026-11-12)
 
 - Device table (`src/printer/devices.ts`): engines, USB interfaces, head widths and tape constants per model instead of hardcoded DUO values. The DUO `0922:001D` prints byte-identically to 0.3.0 (golden test)
