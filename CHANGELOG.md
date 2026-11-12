@@ -2,7 +2,7 @@
 
 All notable changes to Second Label. Versions follow [Semantic Versioning](https://semver.org): new features raise the middle number, fixes the last one.
 
-## Unreleased
+## 0.4.0 (2026-11-12)
 
 - Device table (`src/printer/devices.ts`): engines, USB interfaces, head widths and tape constants per model instead of hardcoded DUO values. The DUO `0922:001D` prints byte-identically to 0.3.0 (golden test)
 - Experimental, untested support for LabelWriter 450 Duo (`0023`), DUO with 96-dot tape (`0017`), 450 (`0020`), 450 Turbo (`0021`), 400 (`0019`) and 400 Turbo (`001A`). They start from a neutral calibration; the app shows a hint to calibrate and to send a report
